@@ -8,6 +8,31 @@ import {encodePortrait,decodePortrait,cleanName,bytesToDecimal,decimalToBytes,sh
 import {analyzeSketch} from './path.mjs';
 import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
+import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
+
+test('dense portrait samples preserve Fourier geometry and explicit pen lifts in both modes',()=>{
+  const path=Array.from({length:16},(_,i)=>({x:20*Math.cos(i*Math.PI/8),y:15*Math.sin(i*Math.PI/8),draw:i<6||i>9})),chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};
+  for(const mode of ['xy','complex']){
+    const points=samplePortrait(mode,chains,path,7200);assert.equal(points.length,7201);
+    for(let i=0;i<points.length;i+=37){const t=i/7200;assert.ok(Math.hypot(points[i].x-20*Math.cos(t*2*Math.PI),points[i].y-15*Math.sin(t*2*Math.PI))<1e-10);assert.equal(points[i].draw,path[Math.min(15,Math.floor(t*16))].draw);}
+  }
+  assert.deepEqual(samplePortrait('xy',chains,[]),[]);assert.throws(()=>samplePortrait('xy',chains,path,0),RangeError);
+});
+
+test('seam repair only closes short smooth gaps, preserving distant and sharp pen lifts',()=>{
+  const points=Array.from({length:10},(_,i)=>({x:i,y:0,draw:i!==0&&i!==4&&i!==5})),before=structuredClone(points);
+  assert.ok(closeStrokeSeams(points,3).slice(1).every(p=>p.draw));assert.deepEqual(points,before);
+  assert.equal(closeStrokeSeams(points,0)[4].draw,false);
+  const corner=points.map((p,i)=>i>5?{...p,x:5,y:i-5}:p);assert.equal(closeStrokeSeams(corner,3)[4].draw,false);
+  const distant=points.map((p,i)=>({...p,x:p.x+(i>=5?30:0)}));assert.equal(closeStrokeSeams(distant,3)[4].draw,false);
+  assert.deepEqual(closeStrokeSeams([],3),[]);assert.throws(()=>closeStrokeSeams(points,-1),RangeError);
+});
+
+test('visitor ink stays readable and scales glow with the actual DPR backing store',()=>{
+  assert.equal(PORTRAIT_INK.color,CARD_GOLD);assert.equal(PORTRAIT_INK.width,2.2);
+  for(const css of [344,500]){const a=visitorInk(css,css/900),b=visitorInk(css,css*3/900);assert.equal(a.width,b.width);assert.ok(Math.abs(b.glow-3*a.glow)<1e-12);assert.ok(a.width*css/900>=1.1-1e-12);}
+  assert.throws(()=>visitorInk(0,1),RangeError);assert.throws(()=>visitorInk(344,NaN),RangeError);
+});
 
 test('gold QR uses flat integer modules and an untextured four-module dark quiet zone',()=>{
   const qrcode=createRequire(import.meta.url)('./qrcode.js'),qr=qrcode(18,'L');qr.addData('a portrait in circles','Byte');qr.make();

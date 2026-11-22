@@ -5,6 +5,7 @@ import {formulaBody, latexDocument, limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,SHARE_BASE} from './share.mjs';
 import {renderSocialCard} from './card.mjs';
 import {analyzeSketch} from './path.mjs';
+import {PORTRAIT_INK,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d');
@@ -21,6 +22,7 @@ let mode = 'xy', plot = {x:450,y:450,scale:1}, topChain = {x:450,y:150}, leftCha
 let automatic = null, manual = false;
 let shared = false, cardSurface = null, cardPayload = null, cardGeneration = 0;
 let sharedName = '', sharedGuess = false, scrubPending = false;
+let surfaceRatio=1,sharedWidth=900;
 let currentSampleId = '';
 let automaticBounds = null;
 let dimensions = {width:360,height:360}, scale = 1, time = 0, drawn = 0;
@@ -54,7 +56,7 @@ function setStage(next) {
     $('shared-controls').hidden=next!=='result';
   }
   if(shared&&next==='result'){
-    plot={x:450,y:450,scale};drawn=0;ink.clearRect(0,0,900,900);drawTrail(resolution);
+    plot={x:450,y:450,scale};drawSharedPortrait();
     $('story').textContent='这是由数学系数重建的肖像。你的照片，也有自己的星轨。';
   }
   if(next==='sketch') setView('sketch');
@@ -278,7 +280,7 @@ $('shared-terms').addEventListener('input',()=>{
     const selected=limitChains(mode,{x:xCoefficients,y:yCoefficients,complex:coefficients},Number($('shared-terms').value));
     activeX=selected.x;activeY=selected.y;active=selected.complex;
     const count=mode==='xy'?activeX.length+activeY.length:active.length;$('shared-count').value=`${count} / ${$('shared-terms').max} 个圆`;
-    drawn=0;ink.clearRect(0,0,900,900);drawTrail(resolution);
+    drawSharedPortrait();
   });
 });
 $('save-card').addEventListener('click',()=>{if(cardSurface)download(cardSurface,`fourier-card-${$('card-format').value}.png`);});
@@ -305,11 +307,31 @@ $('copy-formula').addEventListener('click',async()=>{
 });
 $('download-sketch').addEventListener('click',()=>{if(sketch)download(sketch,'fourier-lineart.png');});
 $('download').addEventListener('click',()=>{
-  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle='#161512';out.fillRect(0,0,900,900);out.drawImage(trail,0,0);download(output,'fourier-portrait.png');
+  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle='#161512';out.fillRect(0,0,900,900);out.drawImage(trail,0,0,900,900);download(output,'fourier-portrait.png');
 });
 
+function drawSharedPortrait(){
+  const count=Math.max(7200,Math.ceil(canvas.width*8/path.length)*path.length);
+  const points=samplePortrait(mode,currentChains(),path,count).map(p=>({...p,x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}));
+  const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio);
+  ink.clearRect(0,0,900,900);ink.save();ink.strokeStyle=PORTRAIT_INK.color;ink.lineWidth=style.width;ink.lineJoin='round';ink.lineCap='round';ink.shadowBlur=style.glow;ink.shadowColor=PORTRAIT_INK.shadow;ink.beginPath();
+  strokes.forEach((p,i)=>{if(!i||!p.draw)ink.moveTo(p.x,p.y);else ink.lineTo(p.x,p.y);});ink.stroke();ink.restore();drawn=resolution;
+}
+
+function resizeSharedCanvas(){
+  if(!shared)return;
+  const width=canvas.getBoundingClientRect().width,size=Math.max(1,Math.round(width*devicePixelRatio));
+  if(canvas.width===size&&sharedWidth===width)return;
+  const target=drawn;sharedWidth=width;surfaceRatio=size/900;canvas.width=canvas.height=trail.width=trail.height=size;
+  ctx.setTransform(surfaceRatio,0,0,surfaceRatio,0,0);ink.setTransform(surfaceRatio,0,0,surfaceRatio,0,0);drawn=0;
+  if(stage==='result')drawSharedPortrait();else drawTrail(target);
+}
+new ResizeObserver(resizeSharedCanvas).observe(canvas);window.addEventListener('resize',resizeSharedCanvas);
+function watchDensity(){matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener('change',()=>{resizeSharedCanvas();watchDensity();},{once:true});}
+watchDensity();
+
 function drawTrail(target) {
-  ink.strokeStyle='#e7bf7d';ink.lineWidth=1.65;ink.lineJoin='round';ink.lineCap='round';ink.beginPath();
+  ink.strokeStyle=shared?PORTRAIT_INK.color:'#e7bf7d';ink.lineWidth=shared?visitorInk(sharedWidth,surfaceRatio).width:1.65;ink.lineJoin='round';ink.lineCap='round';ink.beginPath();
   const start=pen(drawn/resolution);ink.moveTo(start.x,start.y);
   for(let i=drawn+1;i<=target;i++) {
     const {x,y}=pen(i/resolution);
@@ -352,7 +374,7 @@ function render() {
     ctx.globalAlpha=.15;ctx.strokeStyle='#d7b477';ctx.lineWidth=1;ctx.beginPath();
     for(let i=0;i<path.length;i++){const p=path[i],x=plot.x+p.x*plot.scale,y=plot.y+p.y*plot.scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.stroke();ctx.globalAlpha=1;
   }
-  ctx.shadowBlur=reduced.matches?0:6;ctx.shadowColor='#daa65a55';ctx.drawImage(trail,0,0);ctx.shadowBlur=0;
+  ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio).glow):reduced.matches?0:6;ctx.shadowColor=shared?PORTRAIT_INK.shadow:'#daa65a55';ctx.drawImage(trail,0,0,900,900);ctx.shadowBlur=0;
   if(shared&&stage==='result')return;
   if(stage==='result')ctx.globalAlpha=.5;
   let tip;
@@ -369,6 +391,7 @@ function render() {
 }
 
 function frame(timestamp) {
+  if(shared&&canvas.width!==Math.round(canvas.getBoundingClientRect().width*devicePixelRatio))resizeSharedCanvas();
   const dt=last?Math.min((timestamp-last)/1000,.08):0;last=timestamp;
   if(!busy){
     stageTime+=dt;
@@ -396,7 +419,7 @@ function loadShared(){
     scale=350/Math.max(1,...path.map(p=>Math.max(Math.abs(p.x),Math.abs(p.y))));$('terms').max=String(Math.max(coefficients.length,xCoefficients.length,yCoefficients.length));
     for(const button of document.querySelectorAll('[data-mode]'))button.setAttribute('aria-pressed',String(button.dataset.mode===mode));
     const count=mode==='xy'?xCoefficients.length+yCoefficients.length:coefficients.length;$('shared-terms').max=String(Math.max(1,count));$('shared-terms').disabled=count<2;
-    reset();$('status').textContent='仅由数学系数重建 · 没有原始照片';
+    reset();canvas.closest('.lens').after($('lens-note'));resizeSharedCanvas();$('status').textContent='仅由数学系数重建 · 没有原始照片';
   }catch(error){showError(error.message);loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');}
 }
 if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');requestAnimationFrame(frame);

@@ -1,7 +1,8 @@
 import {evaluate} from './fourier.mjs';
 import {shareQrSegments} from './share.mjs';
+import {PORTRAIT_INK} from './portrait-render.mjs';
 
-export const CARD_GOLD='#edc98a',CARD_NIGHT='#161512';
+export const CARD_GOLD=PORTRAIT_INK.color,CARD_NIGHT='#161512';
 
 export function cardStats(mode,chains){
   const values=mode==='xy'?[...chains.x,...chains.y]:chains.complex;
@@ -89,7 +90,7 @@ export function renderSocialCard({mode,chains,path,name,guess=false,energy,share
   }
   const scale=Math.min(box.w/Math.max(1,maxX-minX),box.h/Math.max(1,maxY-minY))*.96,cx=540-(minX+maxX)*scale/2,centerY=cy-(minY+maxY)*scale/2;
   ctx.save();ctx.beginPath();points.forEach((p,i)=>{const x=cx+p.x*scale,y=centerY+p.y*scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
-  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=2.2;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=8;ctx.shadowColor='#d7a25370';ctx.stroke();ctx.restore();
+  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=PORTRAIT_INK.width;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=PORTRAIT_INK.glow;ctx.shadowColor=PORTRAIT_INK.shadow;ctx.stroke();ctx.restore();
   if(story){ctx.fillStyle='#d3b780';ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'圆周知道答案。你猜呢？':'无数个圆，恰好是你。',72,1400);}
   const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
   const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2));
