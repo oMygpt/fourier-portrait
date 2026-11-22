@@ -1,0 +1,11 @@
+name = "fourier-portrait-share"
+main = "index.mjs"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[observability]
+enabled = false
+
+[[r2_buckets]]
+binding = "SKETCHES"
+bucket_name = "fourier-portrait-sketches"

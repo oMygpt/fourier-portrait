@@ -32,12 +32,12 @@ export function numericExcerpt(values,real=true){
   return (terms.slice(0,2).join(' + ')||'0').replaceAll('+ −','− ')+(terms.length>2?' + ⋯':'');
 }
 
-export function cardCopy({mode,chains,name='',guess=false,lang='en',toneMap=null}){
+export function cardCopy({mode,chains,name='',guess=false,lang='en',toneMap=null,encryptedSketch=null}){
   const zh=lang==='zh',groups=mode==='xy'?[['x',chains.x],['y',chains.y]]:[['z',chains.complex]];
   return {
     title:zh?'我的傅里叶公式':'My Fourier Formula',
     cta:zh?['扫码，看它画出我。']:['Scan to watch','it draw me.'],
-    privacy:zh?['照片不上传',toneMap?'分享公式与素描明暗':'只分享公式']:['No photo uploads.',toneMap?'Formula + sketch tones.':'Only the formula is shared.'],
+    privacy:zh?['原始照片不上传',encryptedSketch?'素描端到端加密 · 30 天':toneMap?'分享公式与素描明暗':'只分享公式']:['Original photo stays local.',encryptedSketch?'Sketch encrypted · 30 days.':toneMap?'Formula + sketch tones.':'Only the formula is shared.'],
     example:zh?'傅里叶的公式 → 傅里叶':'Fourier’s formula → Fourier',
     mystery:zh?'我的公式 → ?':'My formula → ?',
     nickname:!guess?name:'',
@@ -55,9 +55,9 @@ function mathLine(ctx,text,x,y,width,size){
   ctx.translate(x+left*scale,y);ctx.scale(scale,scale);ctx.fillText(text,0,0);ctx.restore();
 }
 
-export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,shareURL,lang='en',toneMap=null},format='34'){
+export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,shareURL,lang='en',toneMap=null,encryptedSketch=null},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
-  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',band=h-444,colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,lang,toneMap});
+  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',band=h-444,colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,lang,toneMap,encryptedSketch});
   ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
   for(let i=0;i<22000;i++){const y=i*i*137%h;if(y>band-28)continue;ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,y,1,1);}
   ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);

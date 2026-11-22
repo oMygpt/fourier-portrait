@@ -2,6 +2,7 @@ import {evaluate} from './fourier.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {PALETTE_IDS,normalizePalette} from './palettes.mjs';
 import {packToneMap,unpackToneMap} from './tone.mjs';
+import {packSketchReference,unpackSketchReference} from './encrypted-sketch.mjs';
 
 export const cleanName = value => Array.from(String(value).normalize('NFC').replace(/[\p{C}<>]/gu,'').trim()).slice(0,16).join('');
 export const SHARE_BASE = 'https://omygpt.github.io/fourier-portrait/';
@@ -46,7 +47,7 @@ function compact(values, real, samples) {
   return [...single,...[...pairs.values()].map(c=>({...c,amplitude:Math.hypot(c.re,c.im),phase:Math.atan2(c.im,c.re),weight:2*(c.re*c.re+c.im*c.im)}))].sort((a,b)=>b.weight-a.weight);
 }
 
-export function encodePortrait({mode,chains,path,dimensions,name='',guess=false,palette='ink',toneMap=null}, base=SHARE_BASE, bitBudget=toneMap?8000:5760) {
+export function encodePortrait({mode,chains,path,dimensions,name='',guess=false,palette='ink',toneMap=null,encryptedSketch=null}, base=SHARE_BASE, bitBudget=toneMap||encryptedSketch?8000:5760) {
   const samples=path.length;
   if(samples<2||samples>4096)throw Error('无可分享的画像');
   const title=new TextEncoder().encode(cleanName(name)),real=mode==='xy';
@@ -54,11 +55,12 @@ export function encodePortrait({mode,chains,path,dimensions,name='',guess=false,
   const maskSize=Math.ceil(samples/8),header=25+title.length+maskSize;
   const prefix=base.split('#')[0]+'#n';
   const toneSection=packToneMap(toneMap);
+  const referenceSection=packSketchReference(encryptedSketch);
   const candidates=groups.flatMap((g,chain)=>g.map(c=>({...c,chain}))).sort((a,b)=>b.weight-a.weight);
   function pack(count){
   const chosen=candidates.slice(0,count),selected=groups.map((_,chain)=>chosen.filter(c=>c.chain===chain).sort((a,b)=>a.k-b.k));
   const total=candidates.reduce((s,c)=>s+c.weight,0),energy=total?chosen.reduce((s,c)=>s+c.weight,0)/total:1;
-  const bytes=new Uint8Array(header+chosen.length*6+toneSection.length),view=new DataView(bytes.buffer);let p=0;
+  const bytes=new Uint8Array(header+chosen.length*6+toneSection.length+referenceSection.length),view=new DataView(bytes.buffer);let p=0;
   const u8=v=>view.setUint8(p++,v),u16=v=>{view.setUint16(p,v,true);p+=2;},f32=v=>{view.setFloat32(p,v,true);p+=4;};
   u8(70);u8(2);u8(real?0:1);u16(samples);u16(dimensions.width);u16(dimensions.height);
   u16(selected[0].length);u16(selected[1].length);
@@ -73,6 +75,7 @@ export function encodePortrait({mode,chains,path,dimensions,name='',guess=false,
     u8(Math.round(((c.phase/(2*Math.PI))%1+1)%1*256)%256);
   }}
   bytes.set(toneSection,p);p+=toneSection.length;
+  bytes.set(referenceSection,p);p+=referenceSection.length;
   const compressed=deflateSync(bytes.subarray(0,p),{level:9}),wire=new Uint8Array(compressed.length+2);wire.set([70,2]);wire.set(compressed,2);
   const url=prefix+bytesToDecimal(wire);
   return {url,energy,terms:selected.map(g=>g.reduce((n,c)=>n+(real&&c.k>0?2:1),0)),bytes:wire.length,toneBytes:toneSection.length,qrBits:shareQrBits(url)};
@@ -114,13 +117,22 @@ export function decodePortrait(fragment) {
       }
       return values.sort((a,b)=>b.amplitude-a.amplitude);
     });
-    const toneMap=p<bytes.length?unpackToneMap(bytes.subarray(p)):null;
-    if(p>bytes.length)throw Error();
+    let toneMap=null,encryptedSketch=null;
+    while(p<bytes.length){
+      if(p+4>bytes.length)throw Error();
+      const end=p+4+bytes[p+2]+256*bytes[p+3];if(end>bytes.length)throw Error();
+      const section=bytes.subarray(p,end);
+      if(bytes[p]===84&&!toneMap)toneMap=unpackToneMap(section);
+      else if(bytes[p]===69&&!encryptedSketch)encryptedSketch=unpackSketchReference(section);
+      else throw Error();
+      p=end;
+    }
+    if(p!==bytes.length)throw Error();
     const chains={x:mode==='xy'?groups[0]:[],y:mode==='xy'?groups[1]:[],complex:mode==='complex'?groups[0]:[]};
     const path=lifts.map((draw,i)=>{
       const t=i/samples,p=mode==='xy'?{x:evaluate(chains.x,t).x,y:evaluate(chains.y,t).x}:evaluate(chains.complex,t);
       return {...p,draw};
     });
-    return {mode,chains,path,dimensions:{width,height},name,energy,guess:Boolean(options&1),palette:PALETTE_IDS[options>>1],toneMap};
+    return {mode,chains,path,dimensions:{width,height},name,energy,guess:Boolean(options&1),palette:PALETTE_IDS[options>>1],toneMap,encryptedSketch};
   }catch{throw Error('分享链接无效或版本不受支持，请生成自己的画像。');}
 }

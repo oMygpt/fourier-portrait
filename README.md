@@ -21,9 +21,17 @@
 
 U²-Net portrait q8（44.23MB，Apache-2.0）仅作素描层。contour 与 XDoG 回退保留原有傅里叶路径质量与自动 N。复杂背景使用 YuNet / MODNet 取景；素描层始终尝试 MODNet 抠图与柔和边缘。素描失败时保留 contour，contour 失败时使用 XDoG。模型、ORT、字体和二维码库全部自托管，使用 Cache API 缓存；第一次上传需要下载模型，样例无需下载模型。
 
-分享链接含系数、笔画抬笔数据、尺寸、可选昵称与猜谜标记；素描就绪时还包含 24×32、3-bit 的粗略明暗图。这些明暗来自你的素描，能够表现脸部阴影；**不是只有公式，也不是加密**。不传原始照片或完整素描，语言选择不进入载荷。持有链接的人可以查看和转发画像。新卡片固定墨白配色，旧 navy / silver 分享仍可解码并沿用原配色。数字 `#n` 及旧 `#p=` 链接均兼容；旧链接没有明暗时仍绘制纯线条。
+默认分享链接含系数、笔画抬笔数据、尺寸、可选昵称与猜谜标记；素描就绪时还包含 24×32、3-bit 的粗略明暗图。这些明暗来自你的素描，能够表现脸部阴影；**默认明暗与公式不是加密数据**。默认不上传任何图片，原始照片始终不上传。语言选择不进入载荷。持有链接的人可以查看和转发画像。新卡片固定墨白配色，旧 navy / silver 分享仍可解码并沿用原配色。数字 `#n` 及旧 `#p=` 链接均兼容；旧链接没有明暗时仍绘制纯线条。
 
-访客只需加载静态应用资源，不需要模型、原始照片或完整素描；解码与确定性排线均在本地完成，加载后断网也可重播。冷启动访问网页仍需网络，不提供离线安装或 Service Worker。
+### 可选：端到端加密的完整素描
+
+公式卡中的「附带完整素描」**默认不勾选**。勾选后，浏览器将已抠图的 U²-Net 素描编码为 ≤250 KiB 的 WebP/JPEG，用 WebCrypto 随机生成 AES-GCM-256 密钥和 96-bit IV，本地认证加密后才上传。原始照片不上传。新 R2 存储桶仅收到密文，30 天生命周期自动清理；Worker 在满 30 天时立即停止提供该对象，底层删除由 Cloudflare 异步执行。
+
+随机 128-bit 对象 id 和 256-bit 解密密钥保存在 URL **fragment** 的可选 E1 字段。密钥不发送给存储服务；访客本地解密、淡入真实素描。获取失败、过期或密钥错误时，保留 A 的明暗预览并给出小提示。**持有完整链接的人都能解密、转发和保存，已保存的副本无法撤回**；默认公式/明暗仍可在 30 天后重建。服务商可见网络元数据及密文长度，不是匿名服务。
+
+当前 API 为 workers.dev；客户端地址只定义在 `encrypted-sketch.mjs` 的 `SKETCH_API_BASE`。Worker 源码、无密钥配置与生命周期规则见 [worker/](worker/README.md)。不配置或修改 DNS。
+
+默认访客只需加载静态应用资源，不需要模型、原始照片或完整素描；解码与确定性排线均在本地完成，加载后断网也可重播。选用的完整素描首次获取需要网络，解密到内存后可离线重播。冷启动访问网页仍需网络，不提供离线安装或 Service Worker。
 
 ## English
 
@@ -46,16 +54,25 @@ The header's 中文 / EN toggle defaults from the browser, persists in localStor
 
 The self-hosted U²-Net portrait q8 model is 44.23MB (Apache-2.0), used only for the sketch layer. The existing contour pipeline and XDoG fallback independently preserve Fourier quality and automatic N. YuNet / MODNet frame complex backgrounds; the sketch always attempts MODNet masking and soft paper edges. Sketch failures retain contours; contour failures use XDoG. Models, ORT, fonts and QR generation are all self-hosted. Model downloads use Cache API; pre-baked samples need no model downloads.
 
-Share links include coefficients, pen lifts, dimensions, an optional nickname and a guessing flag. When the sketch is ready, they also include a **24×32, 3-bit coarse tone map derived from your sketch**. It reveals facial shading: the link is not formula-only, and **this is not encryption**. No original photo or full-resolution sketch is included. Anyone with the link can view and forward the portrait. New cards use ink. Old navy/silver visitors retain their palette; old links without tones remain line-only. Numeric `#n` and legacy `#p=` transport remain supported. Language is not encoded.
+Default share links include coefficients, pen lifts, dimensions, an optional nickname and a guessing flag. When ready, they also include a **24×32, 3-bit coarse tone map derived from your sketch**. This reveals facial shading: **default formula/tone data is not encrypted**. No images are uploaded by default; the original photo is never uploaded. Anyone with the link can view and forward the portrait. New cards use ink. Old navy/silver visitors retain their palette; old links without tones remain line-only. Numeric `#n` and legacy `#p=` transport remain supported. Language is not encoded.
 
-Visitors need only the static app assets, not a model, original photo or full sketch. Decoding and deterministic hatching run locally; replay works after disconnecting. A cold page load still needs the network; there is no offline installation or service worker.
+### Optional end-to-end encrypted full sketch
+
+“Include full sketch” is **unchecked by default**. Opting in encodes the matted U²-Net sketch as WebP/JPEG (≤250 KiB), generates a fresh AES-GCM-256 key and 96-bit IV using WebCrypto, then uploads only authenticated ciphertext. The original photo is never uploaded. A dedicated R2 bucket has a 30-day deletion lifecycle; the Worker stops serving an object at 30 days even if Cloudflare's asynchronous deletion has not run yet.
+
+A random 128-bit object id and the 256-bit key are stored in an optional E1 section of the URL **fragment**. The storage service never receives the key. Visitors decrypt locally and fade in the real sketch. Fetch failure, expiry or a wrong key falls back to A's embedded tone preview with a small note. **Anyone with the full link can decrypt, save and forward it; saved copies cannot be recalled.** Default formula/tone data remains reconstructible after expiry. The provider still sees ordinary network metadata and ciphertext sizes; this is not anonymity.
+
+The API currently uses workers.dev. Its only client URL constant is `SKETCH_API_BASE` in `encrypted-sketch.mjs`. Source, credential-free deployment config and lifecycle rules are in [worker/](worker/README.md). No DNS changes are configured.
+
+Default visitors need only the static app assets, not a model, original photo or full sketch. Decoding and deterministic hatching run locally; replay works after disconnecting. An opted-in full sketch needs network access for its initial retrieval, then can replay offline while held in memory. A cold page load still needs the network; there is no offline installation or service worker.
 
 ## Technical notes / 技术说明
 
 - Native HTML/CSS/ES modules, dedicated ML and path workers; no runtime framework.
 - XY applies a real DFT independently to x and y. Pen lifts prevent travel lines across the face. Auto N retains ≥99% energy and targets ≤1.5px mean normalized reconstruction error.
 - The v2 binary payload uses DEFLATE, quantized coefficients and a full pen-lift bitmap. Its option byte stores guessing in bit 0 and legacy palette in bits 1–2. An optional trailing T1 section stores width, height, bit depth and packed quantized darkness; the entire payload is compressed together. Maps are bounded to 2048 cells and 2–4 bits. Darkness is square-root-companded before quantization, then bilinearly interpolated in linear darkness for feathered, grain-modulated cross-hatching. Tone-free payload bytes retain their original format; older deployed decoders need the updated app to read the extension. Numeric transport groups five bytes into thirteen decimal digits with an explicit tail length.
-- QR uses separate Byte (URL) and Numeric (payload) segments. Tone shares have an 8000-bit budget (≤ v22); tone-free links retain 5760 bits (≤ v18). Four-pixel integer modules and a four-module quiet zone are preserved. Coefficients may be trimmed to fit; the visitor slider selects from those transmitted. Cards retain the creator's full-N first terms and counts. Coarse tones cannot reproduce fine U²-Net hair or facial texture.
+- E1 is an optional 52-byte section: tag/version, 16-bit body length, 16-byte object id and 32-byte raw key. AES-GCM ciphertext uses a version byte, 12-byte IV and authentication tag; image MIME is authenticated inside the encrypted plaintext.
+- QR uses separate Byte (URL) and Numeric (payload) segments. Tone/encrypted-reference shares have an 8000-bit budget (≤ v22); links with neither retain 5760 bits (≤ v18). Four-pixel integer modules and a four-module quiet zone are preserved. Coefficients may be trimmed to fit; the visitor slider selects from those transmitted. Cards retain the creator's full-N first terms and counts. Coarse tones cannot reproduce fine U²-Net hair or facial texture.
 - Share base: `https://omygpt.github.io/fourier-portrait/`. Local verification must replace only the origin/path while keeping the exact fragment.
-- Tests: `node --test fourier.test.mjs tone.test.mjs`. Syntax: `node --check app.js` (and other modified modules). Whitespace: `git diff --check`.
+- Tests: `node --test fourier.test.mjs tone.test.mjs encrypted-sketch.test.mjs worker/worker.test.mjs`. Syntax: `node --check app.js` (and other modified modules). Whitespace: `git diff --check`.
 - Model origins, sizes and licenses: [models/README.md](models/README.md). Third-party license files are vendored with their assets.
