@@ -21,13 +21,14 @@
         <div class="journey" aria-label="创作步骤"><span id="step-sketch">01 <b>凝成线条</b></span><span id="step-draw">02 <b>唤醒圆周</b></span><span id="step-result">03 <b>留住此刻</b></span></div>
         <div class="working-actions"><button id="play" class="quiet">Ⅱ 暂停绘制</button><button id="skip" class="quiet">直接看完成图 ↗</button></div>
         <div id="shared-controls" hidden><label for="shared-terms">拨动圆周，看轮廓从模糊到清晰 <output id="shared-count" for="shared-terms"></output></label><input id="shared-terms" type="range" min="1" max="1" value="1"></div>
-        <div class="result-actions"><button id="open-card" class="primary">制作我的公式分享卡 <span>↗</span></button><div><button id="download" class="quiet">↓ 保存人像 PNG</button><button id="replay" class="quiet">↻ 重新播放</button><button id="change" class="quiet">换一张照片 ↗</button></div><a id="shared-start" class="primary" href="./" hidden>我也画一张 ↗</a></div>
+        <div class="result-actions"><button id="open-card" class="primary">制作我的公式分享卡 <span>↗</span></button><div><button id="download" class="quiet">↓ 保存人像 PNG</button><button id="replay" class="quiet">↻ 重新播放</button><button id="change" class="quiet">换一张照片 ↗</button></div><a id="shared-start" class="primary" href="./" hidden>生成我的素描画像 ↗</a></div>
         <p id="status" class="status" role="status" aria-live="polite">正在点亮观星室…</p><button id="use-classic" class="quiet" hidden>无需等待 · 立即使用经典算法</button><p id="error" class="error" role="alert" hidden></p>
       </div>
       <div class="instrument">
         <div class="instrument-top"><span class="eyebrow">THE CELESTIAL PLOTTER</span><span class="edition">N° 001 / 本地观测</span></div>
         <div class="mode-tabs" aria-label="傅里叶绘制模式"><button data-mode="xy" aria-pressed="true">双轴 XY</button><button data-mode="complex" aria-pressed="false">复平面单链</button></div>
         <div class="view-tabs" id="view-tabs" aria-label="查看创作阶段"><button data-view="photo" aria-pressed="false">原图</button><button data-view="sketch" aria-pressed="false">线条画</button><button data-view="fourier" aria-pressed="true">傅里叶绘制</button></div>
+        <div id="result-views" class="result-views" role="group" aria-label="画像呈现方式" hidden><button data-result-view="sketch" aria-pressed="false">素描</button><button data-result-view="lines" aria-pressed="false">傅里叶线条</button><button data-result-view="overlay" aria-pressed="true">叠加</button></div>
         <div class="lens"><div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div><span class="cardinal north" aria-hidden="true">✦</span><span class="cardinal south" aria-hidden="true">∞</span><canvas id="canvas" width="900" height="900" aria-label="人像、线条画与傅里叶圆周画布"></canvas></div><span class="lens-note" id="lens-note">每一笔，都是圆的回声</span>
         <div class="instrument-bottom"><span id="source-label">示例 / 约瑟夫·傅里叶</span><span id="progress">00%</span></div><div class="progress-track"><div id="progress-bar"></div></div>
       </div>
@@ -36,7 +37,7 @@
     </section>
     <section class="sample-gallery" aria-label="名人肖像样例"><div class="gallery-heading"><span class="eyebrow">OR BORROW A FAMILIAR FACE</span><p>也可从一位熟悉的面孔开始</p></div><div id="samples" class="samples"></div></section>
     <details class="advanced" id="advanced"><summary><span>微调这场相遇 <small>线条、圆周与时间</small></span><span class="plus">＋</span></summary><div class="advanced-grid">
-      <label class="control" for="model-style"><span>描线方式</span><select id="model-style"><option value="contour">清晰轮廓 · AI</option><option value="anime">素描线稿 · AI</option><option value="classic">经典算法 · XDoG</option></select><small>本地模型运行，照片不上传</small></label>
+      <label class="control" for="model-style"><span>傅里叶轮廓算法</span><select id="model-style"><option value="contour">清晰轮廓 · AI</option><option value="anime">柔和线条 · AI</option><option value="classic">经典算法 · XDoG</option></select><small>素描单独保留光影；此项只调整圆周描线。经典算法无需模型。</small></label>
       <label class="control" for="style"><span>线条风格 / 粗细 <output id="style-value">50</output></span><input id="style" type="range" min="0" max="100" value="50"><small>轻细刻线 → 柔厚墨线（XDoG）</small></label>
       <label class="control" for="detail"><span>轮廓细节 <output id="detail-value">50</output></span><input id="detail" type="range" min="0" max="100" value="50"><small>保留更短笔画与更细的明暗变化</small></label>
       <label class="control" for="terms"><span>旋转圆数量（每链） <output id="terms-value">自动</output></span><input id="terms" type="range" min="1" max="1800" value="1200"><small id="auto-label">自动选择圆数量</small></label>

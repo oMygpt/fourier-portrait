@@ -1,5 +1,11 @@
 # Local line-art models
 
+## Portrait sketch (display only)
+
+`u2net-portrait-q8.onnx`: U²-Net portrait drawing, upstream Apache-2.0 (`U2NET-LICENSE.txt`). Source and checkpoint: https://github.com/xuebinqin/U-2-Net (portrait generation demo, `u2net_portrait.pth`). Exported locally to ONNX with per-output-channel INT8 weight storage and DequantizeLinear; computation remains floating point. File: **44,233,106 bytes**, below both 50MB and GitHub Pages' 100MB file limit. This is weight compression, not a claim of 4× speed or memory improvement.
+
+Input is RGB stretched to 512×512, normalized by the image maximum and ImageNet mean/std. The first output is inverted/min-max normalized and restored to the source aspect ratio. `sketch-worker.mjs` runs it with the bundled ORT WASM provider in the existing ML Worker; model bytes use the same-origin Cache API. The sketch is display/card-only: contour thresholding, stroke analysis, Fourier coefficients and share payload remain independent. A sketch failure retains contour output; a contour failure falls back to XDoG. Samples have six pre-baked `*-u2.png` sketches, computed from their original sample frames, matching the existing pre-baked contour framing.
+
 `contour512.onnx` and `anime512.onnx`: informative-drawings (Chan et al., CVPR 2021), MIT; ONNX export by x-Liola-x, MIT.
 
 - Original: https://github.com/carolineec/informative-drawings

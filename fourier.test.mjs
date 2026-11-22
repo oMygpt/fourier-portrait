@@ -15,6 +15,28 @@ import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.m
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
+import {u2Input,u2Gray,sketchReveal} from './sketch.mjs';
+
+test('U2 sketch preprocessing and output normalization are independent of Fourier data',()=>{
+  const input=u2Input(Uint8Array.of(255,128,0,255,0,0,255,255));
+  assert.equal(input.length,6);assert.ok(Math.abs(input[0]-(1-.485)/.229)<1e-6);assert.ok(Math.abs(input[4]-(0-.406)/.225)<1e-6);
+  assert.deepEqual([...u2Gray(Float32Array.of(.2,.6,1))],[255,127,0]);assert.deepEqual([...u2Gray(Float32Array.of(.5,.5))],[255,255]);
+  assert.ok([...u2Input(new Uint8Array(4))].every(Number.isFinite));
+  assert.throws(()=>u2Input(new Uint8Array()),RangeError);assert.throws(()=>u2Input(new Uint8Array(3)),RangeError);assert.throws(()=>u2Gray([]),RangeError);assert.throws(()=>u2Gray([NaN]),RangeError);
+});
+
+test('sketch opacity reveals smoothly without changing Fourier samples or payload',()=>{
+  assert.equal(sketchReveal(-1),0);assert.equal(sketchReveal(0),0);assert.equal(sketchReveal(1),1);assert.equal(sketchReveal(2),1);assert.ok(sketchReveal(.3)<sketchReveal(.7));
+  const path=Array.from({length:64},(_,i)=>({x:20*Math.cos(i*Math.PI/32),y:15*Math.sin(i*Math.PI/32),draw:true})),chains={complex:dft(path)},data={mode:'complex',path,chains,dimensions:{width:40,height:30}};
+  assert.deepEqual(encodePortrait(data),encodePortrait({...data,sketch:new Uint8Array([0,255]),resultView:'overlay'}));
+});
+
+test('all six samples include full-resolution pre-baked U2 sketches',()=>{
+  for(const id of ['fourier','einstein','newton','curie','euler','gauss']){
+    const png=readFileSync(new URL(`./samples/${id}-u2.png`,import.meta.url));assert.equal(png.subarray(1,4).toString(),'PNG');assert.equal(Math.max(png.readUInt32BE(16),png.readUInt32BE(20)),512);
+  }
+  assert.ok(readFileSync(new URL('./models/u2net-portrait-q8.onnx',import.meta.url)).length<50_000_000);
+});
 
 test('hash navigation accepts numeric and legacy shares, resets home and rejects broken payloads',()=>{
   const path=Array.from({length:64},(_,i)=>({x:20*Math.cos(i*Math.PI/32),y:15*Math.sin(i*Math.PI/32),draw:true}));

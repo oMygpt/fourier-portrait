@@ -31,3 +31,9 @@ nav>a,.quiet,.journey b,.gallery-heading p,.control>span,.privacy-note>div{color
 .lens-note{position:static;display:block;margin:14px 0 0;color:var(--muted);line-height:1.8}.sample img{filter:grayscale(1);border-color:var(--line)}.formula{color:var(--paper)}.error{color:var(--gold)}
 .control select,#card-dialog,.card-options input,.card-options select{background:var(--panel);color:var(--paper);border-color:var(--line)}
 #card-dialog{box-shadow:0 24px 90px #00000025}#card-dialog::backdrop{background:#10141999}.card-preview{background:var(--panel-alt)}.drop-message{background:var(--panel)}
+.result-views{display:flex;width:fit-content;max-width:100%;margin:0 auto 8px;border:1px solid var(--line);padding:3px;gap:3px;border-radius:3px;background:var(--panel)}
+.result-views button{border:0;border-radius:1px;background:transparent;color:var(--muted);padding:9px 16px;font-size:11px;letter-spacing:1px}
+.result-views button[aria-pressed=true]{background:var(--paper);color:var(--ink)}
+.result-views[hidden],body.shared .result-views,body[data-stage=result] .view-tabs{display:none}
+@media(max-width:650px){.result-views button{font-size:10px;padding:9px 13px}}
+@media(max-width:650px){body:not(.shared)[data-stage=result] .observatory{padding-top:18px}body:not(.shared)[data-stage=result] .invitation{display:contents}body:not(.shared)[data-stage=result] #chapter,body:not(.shared)[data-stage=result] #story,body:not(.shared)[data-stage=result] .journey{display:none}body:not(.shared)[data-stage=result] #heading{order:0;font-size:24px;text-align:center;margin:6px 0}body:not(.shared)[data-stage=result] .instrument{order:1}body:not(.shared)[data-stage=result] .result-actions{order:2;text-align:center;margin-top:12px}body:not(.shared)[data-stage=result] #status{order:3;text-align:center}body:not(.shared)[data-stage=result] #error{order:4}}
