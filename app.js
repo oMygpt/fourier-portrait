@@ -71,6 +71,21 @@ function prepare(image) {
 
 function showError(message) { $('error').textContent=message;$('error').hidden=false; }
 
+async function focusStage(token) {
+  const top=Math.min($('heading').getBoundingClientRect().top,document.querySelector('.instrument').getBoundingClientRect().top);
+  const target=Math.max(0,Math.min(scrollY+top-24,document.documentElement.scrollHeight-innerHeight));
+  scrollTo({top:target,behavior:reduced.matches?'instant':'smooth'});
+  if(reduced.matches)return;
+  await new Promise(resolve=>{
+    const deadline=performance.now()+1800;
+    function settled(){
+      if(token!==generation||Math.abs(scrollY-target)<1||performance.now()>deadline)resolve();
+      else requestAnimationFrame(settled);
+    }
+    requestAnimationFrame(settled);
+  });
+}
+
 async function loadImage(source,name,demo=false,sampleId='') {
   const token=++generation;busy=true;$('error').hidden=true;$('status').textContent='正在本地将照片化作线条…';
   try {
@@ -80,6 +95,7 @@ async function loadImage(source,name,demo=false,sampleId='') {
     const result=prepare(image);if(token!==generation)return;
     install(result,image,name,demo);
     for(const button of document.querySelectorAll('[data-sample]'))button.setAttribute('aria-pressed',String(button.dataset.sample===sampleId));
+    if(!demo)await focusStage(token);
   } catch(error) {
     if(token===generation){showError(error.message.startsWith('未找到')?error.message:'无法读取图片。请选择有效的 JPG / PNG，或尝试较小的照片。');$('status').textContent=picture?'上一幅作品仍为你保留。':'请选择照片，或试试下方名人肖像。';}
   } finally {if(token===generation)busy=false;}
