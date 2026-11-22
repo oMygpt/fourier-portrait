@@ -1,7 +1,101 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {dft,evaluate,orderPath,edgePoints} from './fourier.mjs';
-import {xdog,styleParameters,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
+import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope} from './fourier.mjs';
+import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
+import {selectTerms,formulaBody,latexDocument} from './portrait.mjs';
+import {encodePortrait,decodePortrait,cleanName} from './share.mjs';
+import {analyzeSketch} from './path.mjs';
+
+test('worker sketch analysis prepares Fourier chains and rejects empty or invalid sketches',()=>{
+  const binary=new Uint8Array(32*32).fill(255);
+  for(let y=5;y<27;y++){binary[y*32+8]=0;binary[y*32+22]=0;}
+  const result=analyzeSketch(binary,32,32,3);
+  assert.equal(result.path.length,1800);assert.equal(result.coefficients.length,1800);
+  assert.ok(result.automatic.x.count>=8);assert.ok(result.bounds.x.radius>0);
+  assert.ok(result.path.some(p=>!p.draw));
+  assert.throws(()=>analyzeSketch(new Uint8Array(32*32).fill(255),32,32,3),/未找到足够线条/);
+  assert.throws(()=>analyzeSketch([],32,32,3),RangeError);
+  const portrait=new Uint8Array(64*64).fill(255);
+  for(let y=12;y<=18;y++)portrait[y*64+32]=0;
+  for(let y=45;y<=51;y++)portrait[y*64+5]=0;
+  for(let y=30;y<=55;y++)portrait[y*64+55]=0;
+  assert.equal(analyzeSketch(portrait,64,64,10,true).strokes.length,2);
+});
+
+test('model thresholding preserves contours, removes tiny components and handles blank/error inputs',()=>{
+  const gray=new Uint8Array(20*20).fill(255);
+  for(let y=4;y<16;y++)gray[y*20+10]=40;
+  gray[21]=0;
+  const binary=thresholdSketch(gray,20,20);
+  assert.equal(binary[21],255);assert.equal(binary[10*20+10],0);assert.ok(binary.every(v=>v===0||v===255));
+  assert.ok(thresholdSketch(new Uint8Array(100).fill(255),10,10).every(v=>v===255));
+  assert.throws(()=>thresholdSketch([],10,10),RangeError);
+});
+
+test('versioned portrait URLs preserve both modes, pen lifts and bounded reconstruction',()=>{
+  const path=Array.from({length:128},(_,i)=>({x:80*Math.cos(2*Math.PI*i/128)+8*Math.sin(6*Math.PI*i/128),y:65*Math.sin(4*Math.PI*i/128),draw:i%20>2}));
+  const chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};
+  for(const mode of ['xy','complex']){
+    const encoded=encodePortrait({mode,chains,path,dimensions:{width:200,height:200},name:'Ada <3\n'},'https://example.org/portrait/');
+    assert.ok(encoded.url.length<=2000);assert.ok(encoded.energy>=.99);
+    const decoded=decodePortrait(encoded.url);
+    assert.equal(decoded.mode,mode);assert.equal(decoded.name,'Ada 3');
+    assert.deepEqual(decoded.path.map(p=>p.draw),path.map(p=>p.draw));
+    const error=path.reduce((sum,p,i)=>sum+Math.hypot(p.x-decoded.path[i].x,p.y-decoded.path[i].y),0)/path.length;
+    assert.ok(error<1,`round-trip error ${error}`);
+    assert.deepEqual(decoded.dimensions,{width:200,height:200});
+  }
+  assert.ok(Array.from(cleanName('x'.repeat(30))).length<=16);
+  assert.throws(()=>decodePortrait('#p=garbage'),/分享链接无效/);
+  assert.throws(()=>decodePortrait('#p='+'a'.repeat(5000)),/分享链接无效/);
+  assert.throws(()=>encodePortrait({mode:'xy',chains,path:[],dimensions:{width:200,height:200}},'https://example.org/'),/无可分享/);
+});
+
+test('automatic terms meet energy and normalized reconstruction error with a bounded minimum',()=>{
+  const points=Array.from({length:64},(_,i)=>({x:80*Math.cos(2*Math.PI*i/64)+.05*Math.sin(26*Math.PI*i/64),y:50*Math.sin(4*Math.PI*i/64)}));
+  for(const [values,axis] of [[dft(points),''],[realDft(points.map(p=>p.x)),'x'],[realDft(points.map(p=>p.y)),'y']]){
+    const selection=selectTerms(values,points,2,axis);
+    assert.ok(selection.count>=8&&selection.count<64);assert.ok(selection.energy>=.99);assert.ok(selection.error<=1.5);
+  }
+  assert.equal(selectTerms([],[]).count,0);
+  assert.equal(selectTerms(realDft([0,0]),[{x:0},{x:0}],1,'x').count,2);
+});
+
+test('personal LaTeX includes current terms, valid delimiters and clean signs',()=>{
+  const values=[{k:0,re:-.12,im:-.2,amplitude:.233,phase:-2.1},{k:-1,re:2,im:.3,amplitude:2.02,phase:.15}];
+  const chains={x:values,y:values,complex:values};
+  for(const mode of ['xy','complex']){
+    const body=formulaBody(mode,chains),document=latexDocument(mode,chains);
+    assert.ok(!body.includes('+ -'));assert.ok(!document.includes('+ -'));
+    assert.equal((body.match(/\\cos/g)||[]).length,mode==='xy'?4:0);
+    assert.equal((body.match(/e\^/g)||[]).length,mode==='complex'?2:0);
+    let depth=0;for(const c of document){if(c==='{')depth++;if(c==='}')depth--;assert.ok(depth>=0);}assert.equal(depth,0);
+    assert.ok(document.includes('\\documentclass{article}'));assert.ok(document.includes('\\end{document}'));
+    assert.ok(formulaBody(mode,chains,1).includes('共 2 项'));
+    assert.ok(latexDocument(mode,{x:[],y:[],complex:[]}).includes('=0'));
+  }
+});
+
+test('real XY chains reconstruct both axes with zero and quarter-turn rotations',()=>{
+  for(const n of [7,16]) {
+    const x=Array.from({length:n},(_,i)=>Math.sin(i)*37+3),y=x.map((_,i)=>Math.cos(i*2)*23-5);
+    const X=realDft(x),Y=realDft(y);
+    for(let i=0;i<n;i++) {
+      assert.ok(Math.abs(chainTip(X,i/n).x-x[i])<1e-9);
+      assert.ok(Math.abs(chainTip(Y,i/n,Math.PI/2).y-y[i])<1e-9);
+    }
+    for(const coefficients of [X,Y,X.slice(0,3)]) {
+      const bounds=axisEnvelope(coefficients);
+      for(let i=0;i<100;i++)for(let j=0;j<coefficients.length;j++) {
+        const tip=chainTip(coefficients.slice(0,j),i/100),r=coefficients[j].amplitude;
+        assert.ok(Math.abs(tip.x)+r<=bounds.radius+1e-8);
+        assert.ok(Math.abs(tip.y)+r<=bounds.band+1e-8);
+      }
+    }
+  }
+  assert.deepEqual(realDft([]),[]);assert.deepEqual(chainTip([],0,Math.PI/2),{x:0,y:0});
+  assert.equal(axisEnvelope([]).radius,0);
+});
 
 test('DFT reconstructs an arbitrary closed sequence, odd and even lengths',()=>{
   for(const n of [7,16]) {

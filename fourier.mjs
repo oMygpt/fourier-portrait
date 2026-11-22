@@ -58,3 +58,35 @@ export function evaluate(coefficients, t) {
   }
   return {x, y};
 }
+
+export function realDft(values) {
+  return dft(values.map(x => ({x, y:0})));
+}
+
+export function chainTip(coefficients, t, rotation = 0) {
+  const p = evaluate(coefficients, t), c = Math.cos(rotation), s = Math.sin(rotation);
+  return {x:p.x*c-p.y*s, y:p.x*s+p.y*c};
+}
+
+export function axisEnvelope(coefficients) {
+  let radius = 0, transverse = 0, band = 0, speed = 0;
+  const unmatched = new Map();
+  for (const c of coefficients) {
+    speed += Math.abs(c.k)*c.amplitude;
+    band = Math.max(band, transverse + c.amplitude);
+    if (!c.k) continue;
+    if (unmatched.has(-c.k)) {
+      transverse -= unmatched.get(-c.k); unmatched.delete(-c.k);
+    } else {unmatched.set(c.k,c.amplitude);transverse += c.amplitude;}
+  }
+  const samples=2048;
+  for(let i=0;i<samples;i++){
+    let x=0;
+    for(const c of coefficients){
+      radius=Math.max(radius,Math.abs(x)+c.amplitude);
+      x+=c.amplitude*Math.cos(c.phase+2*Math.PI*c.k*i/samples);
+    }
+  }
+  radius+=Math.PI*speed/samples;
+  return {radius, band:band+1e-7};
+}

@@ -2,12 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#161512"><meta name="description" content="照片化作线条，圆周重新描绘你。完全本地运行的 XDoG 线条画与傅里叶人像。">
+  <meta name="theme-color" content="#161512"><meta name="description" content="照片化作线条，圆周重新描绘你。完全本地运行的 AI 线条画与双轴傅里叶人像。">
   <title>圆周之间 · 以星轨，描绘你</title><link rel="icon" href="data:,">
-  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script type="module" src="app.js"></script>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <script defer src="vendor/katex/katex.min.js"></script><script defer src="qrcode.js"></script><script type="module" src="app.js"></script>
 </head>
 <body data-stage="landing">
   <div class="grain" aria-hidden="true"></div>
@@ -21,11 +20,12 @@
         <div class="landing-actions"><button class="primary" id="choose">上传你的照片 <span>↗</span></button><p class="upload-hint">也可拖入 JPG / PNG · 全程本地计算</p></div>
         <div class="journey" aria-label="创作步骤"><span id="step-sketch">01 <b>凝成线条</b></span><span id="step-draw">02 <b>唤醒圆周</b></span><span id="step-result">03 <b>留住此刻</b></span></div>
         <div class="working-actions"><button id="play" class="quiet">Ⅱ 暂停绘制</button><button id="skip" class="quiet">直接看完成图 ↗</button></div>
-        <div class="result-actions"><button id="download" class="primary">保存人像 PNG <span>↓</span></button><div><button id="replay" class="quiet">↻ 重新播放</button><button id="change" class="quiet">换一张照片 ↗</button></div></div>
-        <p id="status" class="status" role="status" aria-live="polite">正在点亮观星室…</p><p id="error" class="error" role="alert" hidden></p>
+        <div class="result-actions"><button id="open-card" class="primary">制作我的公式分享卡 <span>↗</span></button><div><button id="download" class="quiet">↓ 保存人像 PNG</button><button id="replay" class="quiet">↻ 重新播放</button><button id="change" class="quiet">换一张照片 ↗</button></div><a id="shared-start" class="primary" href="./" hidden>生成我的傅里叶画像 ↗</a></div>
+        <p id="status" class="status" role="status" aria-live="polite">正在点亮观星室…</p><button id="use-classic" class="quiet" hidden>无需等待 · 立即使用经典算法</button><p id="error" class="error" role="alert" hidden></p>
       </div>
       <div class="instrument">
         <div class="instrument-top"><span class="eyebrow">THE CELESTIAL PLOTTER</span><span class="edition">N° 001 / 本地观测</span></div>
+        <div class="mode-tabs" aria-label="傅里叶绘制模式"><button data-mode="xy" aria-pressed="true">双轴 XY</button><button data-mode="complex" aria-pressed="false">复平面单链</button></div>
         <div class="view-tabs" id="view-tabs" aria-label="查看创作阶段"><button data-view="photo" aria-pressed="false">原图</button><button data-view="sketch" aria-pressed="false">线条画</button><button data-view="fourier" aria-pressed="true">傅里叶绘制</button></div>
         <div class="lens"><div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div><span class="cardinal north" aria-hidden="true">✦</span><span class="cardinal south" aria-hidden="true">∞</span><canvas id="canvas" width="900" height="900" aria-label="人像、线条画与傅里叶星轨画布"></canvas><span class="lens-note" id="lens-note">每一笔，都是圆的回声</span></div>
         <div class="instrument-bottom"><span id="source-label">示例 / 约瑟夫·傅里叶</span><span id="progress">00%</span></div><div class="progress-track"><div id="progress-bar"></div></div>
@@ -35,19 +35,24 @@
     </section>
     <section class="sample-gallery" aria-label="名人肖像样例"><div class="gallery-heading"><span class="eyebrow">OR BORROW A FAMILIAR FACE</span><p>也可从一位熟悉的面孔开始</p></div><div id="samples" class="samples"></div></section>
     <details class="advanced" id="advanced"><summary><span>微调这场相遇 <small>线条、圆周与时间</small></span><span class="plus">＋</span></summary><div class="advanced-grid">
+      <label class="control" for="model-style"><span>描线方式</span><select id="model-style"><option value="contour">清晰轮廓 · AI</option><option value="anime">素描线稿 · AI</option><option value="classic">经典算法 · XDoG</option></select><small>本地模型运行，照片不上传</small></label>
       <label class="control" for="style"><span>线条风格 / 粗细 <output id="style-value">50</output></span><input id="style" type="range" min="0" max="100" value="50"><small>轻细刻线 → 柔厚墨线（XDoG）</small></label>
       <label class="control" for="detail"><span>轮廓细节 <output id="detail-value">50</output></span><input id="detail" type="range" min="0" max="100" value="50"><small>保留更短笔画与更细的明暗变化</small></label>
-      <label class="control" for="terms"><span>旋转圆数量 <output id="terms-value">1200</output></span><input id="terms" type="range" min="1" max="1800" value="1200"><small>圆越多，越接近线条画</small></label>
+      <label class="control" for="terms"><span>旋转圆数量（每链） <output id="terms-value">自动</output></span><input id="terms" type="range" min="1" max="1800" value="1200"><small id="auto-label">自动选择圆数量</small></label>
+      <button id="restore-auto" class="quiet" hidden>恢复自动</button>
       <label class="control" for="speed"><span>绘制速度 <output id="speed-value">1.0×</output></span><input id="speed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
       <label class="toggle"><input id="original" type="checkbox" role="switch"><span>淡淡叠加原图</span></label><label class="toggle"><input id="circles" type="checkbox" role="switch" checked><span>显示旋转圆</span></label><button id="download-sketch" class="quiet">↓ 保存线条画 PNG</button><button id="crop" class="quiet">⌗ 调整取景（拖选保留区域）</button>
     </div></details>
+    <section class="personal-formula" id="personal-formula" hidden><span class="eyebrow">YOUR PORTRAIT, IN EQUATIONS</span><h2>把你的星轨，写成公式。</h2><div id="formula-preview" class="formula"></div><p id="formula-count"></p><button id="download-formula" class="quiet">↓ 保存公式 (LaTeX)</button><button id="copy-formula" class="quiet">复制公式</button><p id="formula-status" role="status"></p></section>
     <section class="formula-section" id="formula"><details id="formula-details"><summary><div><span class="eyebrow">THE POETRY IS MATHEMATICS</span><h2>所谓神秘，不过是圆周的低语。</h2></div><span class="formula-invite">揭开公式 <b>＋</b></span></summary><div class="formula-content">
       <p class="formula-intro">一幅肖像，先成为墨线，再成为复数，最后成为旋转。<br>Fourier series, one orbit at a time.</p>
-      <div class="math-grid"><article><span class="step">I / 从照片到线条</span><h3>把轮廓，写成复数</h3><p>XDoG 将明暗化作黑白线条，经细化、笔画描摹与简化，按最近端点连接，沿弧长均匀采样。横坐标为实部，纵坐标为虚部。</p><div class="formula" data-tex="z_n=x_n+i y_n">zₙ = xₙ + i yₙ</div></article><article><span class="step">II / 从线条到圆周</span><h3>在频率中，找到秩序</h3><p>离散傅里叶变换（DFT）为每个频率计算复系数。幅值是半径，相位是起始角度，正负频率决定旋转方向。</p><div class="formula" data-tex="c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N}">cₖ = (1/N) Σ zₙ e^(−2πikn/N)</div></article><article><span class="step">III / 从圆周到你</span><h3>让简单，叠加成复杂</h3><p>按幅值由大到小选取 M 项组成 K_M。圆首尾相接，末端写出重建轨迹。更多的圆，带回更多细节。</p><div class="formula" data-tex="z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt}">z(t) ≈ Σ cₖ e^(2πikt)</div></article></div>
+      <article><h3>双轴 XY：让两束光，相遇成你</h3><p>分别对实数序列 xₙ、yₙ 做 DFT，按各自幅值排序。上方链的水平投影给出 x，左侧链旋转 π/2 后的纵向投影给出 y；竖直与水平虚线的交点就是画笔。</p><div class="formula" data-tex="X_k=\frac1N\sum_{n=0}^{N-1}x_n e^{-2\pi i kn/N},\quad Y_k=\frac1N\sum_{n=0}^{N-1}y_n e^{-2\pi i kn/N}">Xₖ = DFT(xₙ), Yₖ = DFT(yₙ)</div><div class="formula" data-tex="x(t)=\operatorname{Re}\sum_k X_k e^{2\pi i kt}=\sum_k |X_k|\cos(2\pi kt+\arg X_k)">x(t) = Σ |Xₖ| cos(2πkt + arg Xₖ)</div><div class="formula" data-tex="y(t)=\operatorname{Re}\sum_k Y_k e^{2\pi i kt}=\sum_k |Y_k|\cos(2\pi kt+\arg Y_k)">y(t) = Σ |Yₖ| cos(2πkt + arg Yₖ)</div></article>
+      <div class="math-grid"><article><span class="step">I / 从照片到线条</span><h3>把轮廓，写成复数</h3><p>AI 将照片化作黑白线条，经细化、笔画描摹与简化，按最近端点连接，沿弧长均匀采样。横坐标为实部，纵坐标为虚部。</p><div class="formula" data-tex="z_n=x_n+i y_n">zₙ = xₙ + i yₙ</div></article><article><span class="step">II / 从线条到圆周</span><h3>在频率中，找到秩序</h3><p>离散傅里叶变换（DFT）为每个频率计算复系数。幅值是半径，相位是起始角度，正负频率决定旋转方向。</p><div class="formula" data-tex="c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N}">cₖ = (1/N) Σ zₙ e^(−2πikn/N)</div></article><article><span class="step">III / 从圆周到你</span><h3>让简单，叠加成复杂</h3><p>按幅值由大到小选取 M 项组成 K_M。圆首尾相接，末端写出重建轨迹。更多的圆，带回更多细节。</p><div class="formula" data-tex="z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt}">z(t) ≈ Σ cₖ e^(2πikt)</div></article></div>
       <div class="legend"><span><b>|cₖ|</b> 圆的半径</span><span><b>arg(cₖ)</b> 初始相位</span><span><b>k</b> 旋转频率</span><span><b>t ∈ [0, 1]</b> 一次完整描绘</span></div><div class="coefficient-panel"><div><span class="eyebrow">A FEW ORBITS, UP CLOSE</span><p>此刻画布中，最大的几个圆</p></div><div id="coefficients"></div></div>
-      <p class="caveat">这不是人脸识别，而是一条闭合路径的近似。笔画间移动时抬笔，避免连接线穿过面孔；背景简洁、光线清晰的照片更适合。<br>线条画：XDoG（Winnemöller 等，2012） · 笔画描摹思路启发自 <a href="https://github.com/LingDong-/linedraw" target="_blank" rel="noreferrer">LingDong-/linedraw</a>（MIT）</p>
+      <p class="caveat">这不是人脸识别，而是一条闭合路径的近似。笔画间移动时抬笔，避免连接线穿过面孔；背景简洁、光线清晰的照片更适合。<br>默认线条画：<a href="https://github.com/carolineec/informative-drawings">informative-drawings</a>（Chan 等，CVPR 2021，MIT） · <a href="https://huggingface.co/x-Liola-x/informative-drawings-onnx">x-Liola-x ONNX 导出</a> · <a href="https://github.com/microsoft/onnxruntime">onnxruntime-web</a>（MIT） · 备用 XDoG · 笔画描摹：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw</a>（MIT）</p>
     </div></details></section>
     <section class="privacy-note"><span aria-hidden="true">⌑</span><div>你的照片，只属于你。<p>没有上传，没有存储。所有绘制都发生在这台设备的浏览器里。</p></div></section>
   </main>
-  <footer><span>圆周之间 <i>·</i> MADE OF CIRCLES & CURIOSITY</span><span>样例肖像：<a href="#sample-credits" id="credits-link">Wikimedia Commons · 公有领域</a></span><details id="sample-credits"><summary>查看肖像来源与鸣谢</summary><div id="credits"></div><p>XDoG / Winnemöller et al. 2012 · 笔画连接灵感：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw (MIT)</a></p></details></footer>
+  <dialog id="card-dialog" aria-labelledby="card-title"><div class="card-heading"><div><span class="eyebrow">A LITTLE MATHEMATICS. ALL YOURS.</span><h2 id="card-title">把这一刻，分享给世界。</h2></div><button id="close-card" class="quiet" aria-label="关闭分享卡片">✕</button></div><div class="card-editor"><div class="card-preview"><img id="card-preview" alt="你的傅里叶公式分享卡片预览"></div><div class="card-options"><label>为星轨署名（可选）<input id="card-name" maxlength="32" placeholder="你的名字 / 昵称"></label><label>卡片比例<select id="card-format"><option value="34">3:4 · 小红书 / 朋友圈</option><option value="916">9:16 · Story</option></select></label><p>照片留在你的设备。二维码只携带数学系数，让朋友看到圆周如何画出你。</p><button id="save-card" class="primary">↓ 保存分享卡片</button><button id="system-share" class="quiet">系统分享 ↗</button><button id="copy-link" class="quiet">复制链接</button><input id="share-url" readonly aria-label="画像分享链接"><p id="card-status" role="status"></p></div></div></dialog>
+  <footer><span>圆周之间 <i>·</i> MADE OF CIRCLES & CURIOSITY</span><span>样例肖像：<a href="#sample-credits" id="credits-link">Wikimedia Commons · 公有领域</a></span><details id="sample-credits"><summary>查看肖像来源与鸣谢</summary><div id="credits"></div><p><a href="https://github.com/carolineec/informative-drawings">informative-drawings · Chan et al., CVPR 2021</a> · <a href="https://huggingface.co/x-Liola-x/informative-drawings-onnx">x-Liola-x ONNX</a> · <a href="https://github.com/microsoft/onnxruntime">onnxruntime-web</a>（均为 MIT）<br>XDoG / Winnemöller et al. 2012 · 笔画连接灵感：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw (MIT)</a> · QR: Kazuhiko Arase（MIT）</p></details></footer>
 </body></html>
