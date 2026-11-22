@@ -19,7 +19,7 @@ export async function modelLineArt(image,style,onProgress){
     worker.onerror=event=>{event.preventDefault();cancelLineArt();};
   }
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(cancelLineArt,30000);
+    const timer=setTimeout(cancelLineArt,90000);
     pending.set(id,{resolve,reject,onProgress,timer});worker.postMessage({id,bitmap,style},[bitmap]);
   });
 }

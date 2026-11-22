@@ -1,5 +1,6 @@
 import {evaluate} from './fourier.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
+import {PALETTE_IDS,normalizePalette} from './palettes.mjs';
 
 export const cleanName = value => Array.from(String(value).normalize('NFC').replace(/[\p{C}<>]/gu,'').trim()).slice(0,16).join('');
 export const SHARE_BASE = 'https://omygpt.github.io/fourier-portrait/';
@@ -44,7 +45,7 @@ function compact(values, real, samples) {
   return [...single,...[...pairs.values()].map(c=>({...c,amplitude:Math.hypot(c.re,c.im),phase:Math.atan2(c.im,c.re),weight:2*(c.re*c.re+c.im*c.im)}))].sort((a,b)=>b.weight-a.weight);
 }
 
-export function encodePortrait({mode,chains,path,dimensions,name='',guess=false}, base=SHARE_BASE, bitBudget=5760) {
+export function encodePortrait({mode,chains,path,dimensions,name='',guess=false,palette='ink'}, base=SHARE_BASE, bitBudget=5760) {
   const samples=path.length;
   if(samples<2||samples>4096)throw Error('无可分享的画像');
   const title=new TextEncoder().encode(cleanName(name)),real=mode==='xy';
@@ -60,7 +61,7 @@ export function encodePortrait({mode,chains,path,dimensions,name='',guess=false}
   u8(70);u8(2);u8(real?0:1);u16(samples);u16(dimensions.width);u16(dimensions.height);
   u16(selected[0].length);u16(selected[1].length);
   const maxima=selected.map(g=>Math.max(...g.map(c=>c.amplitude),1e-9));maxima.forEach(f32);
-  u16(Math.round(energy*65535));u8(title.length);u8(guess?1:0);
+  u16(Math.round(energy*65535));u8(title.length);u8((guess?1:0)|(PALETTE_IDS.indexOf(normalizePalette(palette))<<1));
   bytes.set(title,p);p+=title.length;
   for(let i=0;i<samples;i++)if(path[i].draw)bytes[p+(i>>3)]|=1<<(i%8);p+=maskSize;
   const variable=value=>{while(value>=128){u8((value&127)|128);value>>>=7;}u8(value);};
@@ -93,7 +94,7 @@ export function decodePortrait(fragment) {
     const u8=()=>view.getUint8(p++),u16=()=>{const v=view.getUint16(p,true);p+=2;return v;},f32=()=>{const v=view.getFloat32(p,true);p+=4;return v;};
     if(u8()!==70)throw Error();const version=u8();if(version!==1&&version!==2)throw Error();const flag=u8();if(flag>1)throw Error();
     const mode=flag?'complex':'xy',samples=u16(),width=u16(),height=u16(),counts=[u16(),u16()],maxima=[f32(),f32()],energy=u16()/65535,nameSize=u8(),options=u8();
-    if(options>1||version===1&&options)throw Error();
+    if(options>5||version===1&&options)throw Error();
     if(samples<2||samples>4096||width<4||height<4||width>400||height>400||counts[0]+counts[1]>700||nameSize>64||maxima.some(n=>!Number.isFinite(n)||n<=0||n>1e5))throw Error();
     const size=Math.ceil(samples/8);if(version===1&&bytes.length!==25+nameSize+size+4*(counts[0]+counts[1]))throw Error();
     const name=cleanName(new TextDecoder().decode(bytes.slice(p,p+nameSize)));p+=nameSize;
@@ -116,6 +117,6 @@ export function decodePortrait(fragment) {
       const t=i/samples,p=mode==='xy'?{x:evaluate(chains.x,t).x,y:evaluate(chains.y,t).x}:evaluate(chains.complex,t);
       return {...p,draw};
     });
-    return {mode,chains,path,dimensions:{width,height},name,energy,guess:Boolean(options&1)};
+    return {mode,chains,path,dimensions:{width,height},name,energy,guess:Boolean(options&1),palette:PALETTE_IDS[options>>1]};
   }catch{throw Error('分享链接无效或版本不受支持，请生成自己的画像。');}
 }

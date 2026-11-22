@@ -5,10 +5,18 @@ import {formulaBody, latexDocument, limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,SHARE_BASE} from './share.mjs';
 import {renderSocialCard} from './card.mjs';
 import {analyzeSketch} from './path.mjs';
-import {PORTRAIT_INK,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
+import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
+import {getPalette,normalizePalette} from './palettes.mjs';
 
 const $ = id => document.getElementById(id);
+let palette='ink';
+const colors=()=>getPalette(palette),drawingInk=()=>portraitInk(palette);
+function applyPalette(value){
+  palette=normalizePalette(value);document.body.dataset.palette=palette;
+  document.documentElement.style.background=colors().background;
+  $('card-palette').value=palette;document.querySelector('meta[name="theme-color"]').content=colors().background;
+}
 const canvas = $('canvas'), ctx = canvas.getContext('2d');
 const trail = document.createElement('canvas'); trail.width = trail.height = 900;
 const ink = trail.getContext('2d'), reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -117,37 +125,39 @@ async function prepare(image,sampleId,token) {
   const work=document.createElement('canvas'), ratio=Math.min(1,400/Math.max(image.naturalWidth,image.naturalHeight));
   work.width=Math.max(4,Math.round(image.naturalWidth*ratio));work.height=Math.max(4,Math.round(image.naturalHeight*ratio));
   const wc=work.getContext('2d',{willReadFrequently:true});wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.drawImage(image,0,0,work.width,work.height);
-  let binary,renderer='XDoG',fallback=false;
+  let binary,renderer='XDoG',fallback=false,face=null;
   if(style!=='classic')try{
     let gray;
     if(sampleId){
       const precomputed=new Image();precomputed.src=`samples/${sampleId}-${style}.png`;await precomputed.decode();
+      const ratio=Math.min(1,400/Math.max(precomputed.naturalWidth,precomputed.naturalHeight));work.width=Math.max(4,Math.round(precomputed.naturalWidth*ratio));work.height=Math.max(4,Math.round(precomputed.naturalHeight*ratio));
+      try{const metadata=await (await fetch('samples/portraits.json')).json();face=metadata[sampleId]?.face||null;}catch{}
       const preview=document.createElement('canvas');preview.width=work.width;preview.height=work.height;const pc=preview.getContext('2d',{willReadFrequently:true});pc.drawImage(precomputed,0,0,work.width,work.height);
       const rgba=pc.getImageData(0,0,work.width,work.height).data;gray=Uint8Array.from({length:work.width*work.height},(_,i)=>rgba[i*4]);
       renderer=style==='anime'?'预绘素描线稿':'预绘清晰轮廓';
     }else{
       if(token===generation)$('use-classic').hidden=false;
-      const result=await modelLineArt(image,style,progress=>{if(token===generation)$('status').textContent=progress.inference?'模型正在静静描线…':`正在请模型描线… ${progress.progress}%${progress.cached?' · 已缓存':''}`;});
+      const result=await modelLineArt(image,style,progress=>{if(token===generation)$('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);});
       if(token===generation)$('use-classic').hidden=true;
-      gray=result.gray;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
+      gray=result.gray;face=result.face;work.width=result.width;work.height=result.height;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
     }
     binary=thresholdSketch(gray,work.width,work.height,Number($('detail').value),Number($('style').value));
   }catch{fallback=true;renderer='XDoG';}
   if(!binary)binary=xdog(wc.getImageData(0,0,work.width,work.height).data,work.width,work.height,styleParameters(Number($('style').value),Number($('detail').value)));
   const minLength=(renderer==='XDoG'?8:18)-Number($('detail').value)*(renderer==='XDoG'?.08:.16);
-  const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG'),{strokes}=analysis;
+  const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG',face),{strokes}=analysis;
   wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.strokeStyle='#161512';wc.lineWidth=1.15;wc.lineJoin='round';wc.lineCap='round';
   for(const stroke of strokes){wc.beginPath();wc.moveTo(stroke[0].x,stroke[0].y);for(const p of stroke.slice(1))wc.lineTo(p.x,p.y);wc.stroke();}
   return {...analysis,sketch:work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,elapsed:Math.round(performance.now()-started)};
 }
 
-function analyze(binary,width,height,minLength,portrait){
-  if(!globalThis.Worker)return Promise.resolve(analyzeSketch(binary,width,height,minLength,portrait));
+function analyze(binary,width,height,minLength,portrait,face){
+  if(!globalThis.Worker)return Promise.resolve(analyzeSketch(binary,width,height,minLength,portrait,face));
   return new Promise((resolve,reject)=>{
     const worker=new Worker(new URL('./path-worker.mjs',import.meta.url),{type:'module'});
     worker.onmessage=({data})=>{worker.terminate();data.error?reject(Error(data.error)):resolve(data.result);};
     worker.onerror=event=>{event.preventDefault();worker.terminate();reject(Error('线条处理失败，请重试。'));};
-    worker.postMessage({binary,width,height,minLength,portrait},[binary.buffer]);
+    worker.postMessage({binary,width,height,minLength,portrait,face},[binary.buffer]);
   });
 }
 
@@ -232,7 +242,7 @@ $('crop').addEventListener('click',()=>{
   if(cropping){setView('photo');playing=false;$('play').textContent='▷ 继续绘制';$('status').textContent='在原图上拖选要保留的肖像区域；再次点击调整取景可取消。';canvas.scrollIntoView({block:'center',behavior:reduced.matches?'instant':'smooth'});}
 });
 function cropPoint(event){
-  const rect=canvas.getBoundingClientRect(),w=dimensions.width*scale,h=dimensions.height*scale;
+  const rect=canvas.getBoundingClientRect(),{width:w,height:h}=photoFrame();
   return {x:Math.max(450-w/2,Math.min(450+w/2,(event.clientX-rect.left)/rect.width*900)),y:Math.max(450-h/2,Math.min(450+h/2,(event.clientY-rect.top)/rect.height*900))};
 }
 canvas.addEventListener('pointerdown',event=>{if(cropping){event.preventDefault();cropStart=cropEnd=cropPoint(event);canvas.setPointerCapture(event.pointerId);}});
@@ -243,9 +253,9 @@ canvas.addEventListener('pointerup',async event=>{
   cropEnd=cropPoint(event);const x=Math.min(cropStart.x,cropEnd.x),y=Math.min(cropStart.y,cropEnd.y),w=Math.abs(cropStart.x-cropEnd.x),h=Math.abs(cropStart.y-cropEnd.y);
   cropStart=cropEnd=null;
   if(w<35||h<35){showError('取景区域太小，请重新拖选。');return;}
-  const factor=picture.naturalWidth/(dimensions.width*scale),cropCanvas=document.createElement('canvas');
+  const frame=photoFrame(),factor=picture.naturalWidth/frame.width,cropCanvas=document.createElement('canvas');
   cropCanvas.width=Math.round(w*factor);cropCanvas.height=Math.round(h*factor);
-  cropCanvas.getContext('2d').drawImage(picture,(x-450+dimensions.width*scale/2)*factor,(y-450+dimensions.height*scale/2)*factor,w*factor,h*factor,0,0,cropCanvas.width,cropCanvas.height);
+  cropCanvas.getContext('2d').drawImage(picture,(x-450+frame.width/2)*factor,(y-450+frame.height/2)*factor,w*factor,h*factor,0,0,cropCanvas.width,cropCanvas.height);
   await loadImage(cropCanvas.toDataURL('image/png'),`${sourceName.replace(/ · 已取景$/,'')} · 已取景`);
 });
 function download(surface,name) {const a=document.createElement('a');a.download=name;a.href=surface.toDataURL('image/png');a.click();}
@@ -263,7 +273,7 @@ async function createCard(){
   try{
     await document.fonts.ready;await Promise.all(['24px KaTeX_Main','italic 24px KaTeX_Math','36px KaTeX_Size2'].map(font=>document.fonts.load(font)));await new Promise(resolve=>requestAnimationFrame(resolve));
     if(token!==cardGeneration)return;
-    const snapshot={mode,chains:currentChains(),path,dimensions,name:cleanName($('card-name').value),guess:$('card-guess').checked};
+    const snapshot={mode,chains:currentChains(),path,dimensions,name:cleanName($('card-name').value),guess:$('card-guess').checked,palette};
     const payload=encodePortrait(snapshot,SHARE_BASE);
     const card=renderSocialCard({...snapshot,energy:payload.energy,shareURL:payload.url},$('card-format').value);
     cardSurface=card.canvas;cardPayload=payload;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
@@ -274,6 +284,9 @@ async function createCard(){
 $('open-card').addEventListener('click',()=>{$('card-dialog').showModal();createCard();});
 $('close-card').addEventListener('click',()=>$('card-dialog').close());
 for(const id of ['card-name','card-format','card-guess'])$(id).addEventListener('change',createCard);
+$('card-palette').addEventListener('change',()=>{
+  applyPalette($('card-palette').value);const target=drawn;ink.clearRect(0,0,900,900);drawn=0;drawTrail(target);createCard();
+});
 $('shared-terms').addEventListener('input',()=>{
   if(!shared||stage!=='result'||scrubPending)return;
   scrubPending=true;requestAnimationFrame(()=>{
@@ -308,14 +321,14 @@ $('copy-formula').addEventListener('click',async()=>{
 });
 $('download-sketch').addEventListener('click',()=>{if(sketch)download(sketch,'fourier-lineart.png');});
 $('download').addEventListener('click',()=>{
-  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle='#161512';out.fillRect(0,0,900,900);out.drawImage(trail,0,0,900,900);download(output,'fourier-portrait.png');
+  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);out.drawImage(trail,0,0,900,900);download(output,'fourier-portrait.png');
 });
 
 function drawSharedPortrait(){
   const count=Math.max(7200,Math.ceil(canvas.width*8/path.length)*path.length);
   const points=samplePortrait(mode,currentChains(),path,count).map(p=>({...p,x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}));
-  const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio);
-  ink.clearRect(0,0,900,900);ink.save();ink.strokeStyle=PORTRAIT_INK.color;ink.lineWidth=style.width;ink.lineJoin='round';ink.lineCap='round';ink.shadowBlur=style.glow;ink.shadowColor=PORTRAIT_INK.shadow;ink.beginPath();
+  const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio,palette);
+  ink.clearRect(0,0,900,900);ink.save();ink.strokeStyle=drawingInk().color;ink.lineWidth=style.width;ink.lineJoin='round';ink.lineCap='round';ink.shadowBlur=style.glow;ink.shadowColor=drawingInk().shadow;ink.beginPath();
   strokes.forEach((p,i)=>{if(!i||!p.draw)ink.moveTo(p.x,p.y);else ink.lineTo(p.x,p.y);});ink.stroke();ink.restore();drawn=resolution;
 }
 
@@ -332,7 +345,7 @@ function watchDensity(){matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addE
 watchDensity();
 
 function drawTrail(target) {
-  ink.strokeStyle=shared?PORTRAIT_INK.color:'#e7bf7d';ink.lineWidth=shared?visitorInk(sharedWidth,surfaceRatio).width:1.65;ink.lineJoin='round';ink.lineCap='round';ink.beginPath();
+  ink.strokeStyle=colors().line;ink.lineWidth=shared?visitorInk(sharedWidth,surfaceRatio,palette).width:2.2;ink.lineJoin='round';ink.lineCap='round';ink.beginPath();
   const start=pen(drawn/resolution);ink.moveTo(start.x,start.y);
   for(let i=drawn+1;i<=target;i++) {
     const {x,y}=pen(i/resolution);
@@ -341,9 +354,12 @@ function drawTrail(target) {
   ink.stroke();drawn=target;
 }
 
+function photoFrame(){
+  const ratio=590/Math.max(picture.naturalWidth,picture.naturalHeight);return {width:picture.naturalWidth*ratio,height:picture.naturalHeight*ratio};
+}
 function drawSurface(surface,alpha=1,drawing=false) {
   ctx.globalAlpha=alpha;
-  const s=drawing?plot.scale:scale,w=dimensions.width*s,h=dimensions.height*s;
+  const s=drawing?plot.scale:scale,frame=surface===picture?photoFrame():{width:dimensions.width*s,height:dimensions.height*s},w=frame.width,h=frame.height;
   ctx.drawImage(surface,(drawing?plot.x:450)-w/2,(drawing?plot.y:450)-h/2,w,h);ctx.globalAlpha=1;
 }
 
@@ -351,44 +367,44 @@ function drawChain(values,origin,rotation=0,emphasis=1) {
   let {x,y}=origin;
   for(const c of values){
     const a=c.phase+2*Math.PI*c.k*time+rotation,r=c.amplitude*plot.scale,nx=x+r*Math.cos(a),ny=y+r*Math.sin(a);
-    if($('circles').checked&&r>.6){ctx.strokeStyle=emphasis>1?'#e3bc7eaa':'#d6b77866';ctx.lineWidth=emphasis;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle='#e7b86c99';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(nx,ny);ctx.stroke();}x=nx;y=ny;
+    if($('circles').checked&&r>.6){ctx.strokeStyle=emphasis>1?colors().strong:colors().guide;ctx.lineWidth=emphasis;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle=colors().guide;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(nx,ny);ctx.stroke();}x=nx;y=ny;
   }
   return {x,y};
 }
 
 function render() {
   ctx.clearRect(0,0,900,900);
-  ctx.fillStyle='#b99a62';
+  ctx.fillStyle=colors().muted;
   for(let i=0;i<55;i++) {const x=(i*173.71+51)%900,y=(i*i*113.17+47)%900;ctx.globalAlpha=.08+(i%4)*.035;ctx.beginPath();ctx.arc(x,y,i%7===0?1.3:.6,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;
   if(view==='photo'&&picture){
     drawSurface(picture);
-    if(cropping){ctx.strokeStyle='#ffe0a0';ctx.lineWidth=2;ctx.setLineDash([8,5]);const a=cropStart||{x:450-dimensions.width*scale/2,y:450-dimensions.height*scale/2},b=cropEnd||{x:450+dimensions.width*scale/2,y:450+dimensions.height*scale/2};ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([]);}
+    if(cropping){ctx.strokeStyle=colors().accent;ctx.lineWidth=2;ctx.setLineDash([8,5]);const frame=photoFrame(),a=cropStart||{x:450-frame.width/2,y:450-frame.height/2},b=cropEnd||{x:450+frame.width/2,y:450+frame.height/2};ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([]);}
     return;
   }
   if(view==='sketch'&&sketch){drawSurface(sketch);if(stage==='sketch'&&stageTime<1.6&&!reduced.matches)drawSurface(picture,Math.max(0,1-stageTime/1.6));return;}
   if(stage==='reveal'){
-    ctx.fillStyle='#e6c38a';const count=Math.floor(path.length*Math.min(1,stageTime/1.3));
+    ctx.fillStyle=colors().line;const count=Math.floor(path.length*Math.min(1,stageTime/1.3));
     for(let i=0;i<count;i+=2){const p=path[i];if(!p.draw)continue;ctx.globalAlpha=.55;ctx.beginPath();ctx.arc(plot.x+p.x*plot.scale,plot.y+p.y*plot.scale,1.25,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;return;
   }
   if($('original').checked&&picture)drawSurface(picture,.13,true);
   if(isDemo){
-    ctx.globalAlpha=.15;ctx.strokeStyle='#d7b477';ctx.lineWidth=1;ctx.beginPath();
+    ctx.globalAlpha=.15;ctx.strokeStyle=colors().line;ctx.lineWidth=1;ctx.beginPath();
     for(let i=0;i<path.length;i++){const p=path[i],x=plot.x+p.x*plot.scale,y=plot.y+p.y*plot.scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.stroke();ctx.globalAlpha=1;
   }
-  ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio).glow):reduced.matches?0:6;ctx.shadowColor=shared?PORTRAIT_INK.shadow:'#daa65a55';ctx.drawImage(trail,0,0,900,900);ctx.shadowBlur=0;
+  ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio,palette).glow):reduced.matches?0:colors().glow;ctx.shadowColor=drawingInk().shadow;ctx.drawImage(trail,0,0,900,900);ctx.shadowBlur=0;
   if(shared&&stage==='result')return;
   if(stage==='result')ctx.globalAlpha=.5;
   let tip;
   if(mode==='xy'){
     const X=drawChain(activeX,topChain,0,1.8),Y=drawChain(activeY,leftChain,Math.PI/2);
     tip={x:X.x,y:Y.y};
-    ctx.strokeStyle='#e7b86c70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='#e7bf7d';ctx.font='26px "Noto Serif SC",serif';ctx.textAlign='center';ctx.fillText('X · x(t)',150,180);ctx.fillText('Y · y(t)',150,870);ctx.textAlign='left';
+    ctx.strokeStyle=colors().accent+'70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=colors().text;ctx.font='26px "Noto Serif SC",serif';ctx.textAlign='center';ctx.fillText('X · x(t)',150,180);ctx.fillText('Y · y(t)',150,870);ctx.textAlign='left';
     for(const p of [X,Y]){ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fill();}
   }else tip=drawChain(active,{x:plot.x,y:plot.y});
   ctx.globalAlpha=1;
   const down=path[Math.min(path.length-1,Math.floor(time*path.length))]?.draw;
-  ctx.fillStyle=down?'#ffe1a0':'#a59b86';ctx.shadowColor='#ffd17f';ctx.shadowBlur=reduced.matches||!down?0:14;ctx.beginPath();ctx.arc(tip.x,tip.y,down?2.6:1.6,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  ctx.fillStyle=down?colors().accent:colors().muted;ctx.shadowColor=colors().shadow;ctx.shadowBlur=reduced.matches||!down?0:colors().glow;ctx.beginPath();ctx.arc(tip.x,tip.y,down?2.6:1.6,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
 }
 
 function frame(timestamp) {
@@ -412,7 +428,7 @@ function formulas(){if(window.katex)for(const element of document.querySelectorA
 window.addEventListener('load',formulas);
 function loadShared(){
   try{
-    const data=decodePortrait(location.hash);shared=true;sharedName=data.name;sharedGuess=data.guess;document.body.classList.add('shared');$('shared-start').hidden=false;
+    const data=decodePortrait(location.hash);applyPalette(data.palette);shared=true;sharedName=data.name;sharedGuess=data.guess;document.body.classList.add('shared');$('shared-start').hidden=false;
     ({path,dimensions,mode}=data);picture=sketch=null;isDemo=false;
     coefficients=mode==='complex'?data.chains.complex:dft(path);
     xCoefficients=mode==='xy'?data.chains.x:realDft(path.map(p=>p.x));yCoefficients=mode==='xy'?data.chains.y:realDft(path.map(p=>p.y));

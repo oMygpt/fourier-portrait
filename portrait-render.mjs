@@ -1,6 +1,8 @@
 import {evaluate} from './fourier.mjs';
+import {getPalette} from './palettes.mjs';
 
-export const PORTRAIT_INK={color:'#edc98a',width:2.2,glow:8,shadow:'#d7a25370'};
+export const portraitInk=palette=>{const p=getPalette(palette);return {color:p.line,width:2.2,glow:p.glow,shadow:p.shadow};};
+export const PORTRAIT_INK=portraitInk('ink');
 
 export function samplePortrait(mode,chains,path,count=7200){
   if(!Number.isInteger(count)||count<1)throw new RangeError('Invalid sample count');
@@ -28,8 +30,9 @@ export function closeStrokeSeams(points,maxGap){
   return output;
 }
 
-export function visitorInk(cssWidth,ratio){
+export function visitorInk(cssWidth,ratio,palette='ink'){
   if(!Number.isFinite(cssWidth)||cssWidth<=0||!Number.isFinite(ratio)||ratio<=0)throw new RangeError('Invalid canvas size');
   const scale=700/(690*.96);
-  return {width:Math.max(PORTRAIT_INK.width*scale,1.1*900/cssWidth),glow:PORTRAIT_INK.glow*scale*ratio};
+  const ink=portraitInk(palette);
+  return {width:Math.max(ink.width*scale,1.1*900/cssWidth),glow:ink.glow*scale*ratio};
 }

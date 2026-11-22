@@ -1,10 +1,11 @@
 import {vectorize,joinStrokes,resampleClosed} from './lineart.mjs';
 import {dft,realDft,axisEnvelope} from './fourier.mjs';
 import {selectTerms} from './portrait.mjs';
+import {consolidatePortrait} from './strokes.mjs';
 
-export function analyzeSketch(binary,width,height,minLength,portrait=false){
+export function analyzeSketch(binary,width,height,minLength,portrait=false,face=null){
   if(width<1||height<1||binary.length!==width*height)throw new RangeError('Invalid sketch dimensions');
-  const strokes=vectorize(binary,width,height,portrait?Math.min(3,minLength):minLength).filter(stroke=>{
+  const strokes=portrait&&face?consolidatePortrait(binary,width,height,minLength,face):vectorize(binary,width,height,portrait?Math.min(3,minLength):minLength).filter(stroke=>{
     if(!portrait)return true;
     const center=stroke.reduce((p,q)=>({x:p.x+q.x/stroke.length,y:p.y+q.y/stroke.length}),{x:0,y:0});
     const central=((center.x/width-.5)/.28)**2+((center.y/height-.3)/.25)**2<1;
