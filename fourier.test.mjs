@@ -128,11 +128,25 @@ test('formula cards use real terms, localized copy and no private portrait',()=>
   const en=cardCopy({mode:'xy',chains,name:'Ada'}),zh=cardCopy({mode:'xy',chains,name:'Ada',lang:'zh'});
   assert.equal(en.title,'My Fourier Formula');assert.equal(zh.title,'我的傅里叶公式');assert.equal(en.nickname,'Ada');
   assert.match(en.equations[0].text,/2 cos/);assert.match(en.equations[1].text,/5 cos\(6πt/);
-  assert.equal(en.equations[0].terms,'… 1 terms');assert.equal(zh.equations[0].terms,'… 共 1 项');
+  assert.equal(en.equations[0].terms,'… 1 term');assert.equal(zh.equations[0].terms,'… 共 1 项');
   assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).nickname,'');
   assert.equal(cardCopy({mode:'xy',chains:{x:[],y:[]}}).equations[0].text,'0');
   assert.throws(()=>cardCopy({mode:'xy',chains:{x:[{k:0,amplitude:NaN,phase:0}],y:[]}}),RangeError);
   assert.ok(!renderSocialCard.toString().includes('sketch'));
+});
+
+test('polished cards wrap at term boundaries and keep one bilingual scan CTA',()=>{
+  const values=[{k:1,amplitude:12,phase:.5},{k:3,amplitude:6,phase:-.7},{k:4,amplitude:3,phase:1}];
+  for(const lang of ['zh','en']){
+    const copy=cardCopy({mode:'xy',chains:{x:values,y:[]},lang});
+    assert.deepEqual(copy.equations[0].lines,['= 12 cos(2πt + 0.5)','+ 6 cos(6πt − 0.7) + ⋯']);
+    assert.deepEqual(copy.equations[1].lines,['= 0']);
+    assert.equal((copy.cta.join(' ').match(lang==='zh'?/扫码/g:/Scan/g)||[]).length,1);
+    assert.ok(copy.example.includes(lang==='zh'?'傅里叶':'Fourier'));assert.ok(copy.mystery.endsWith('?'));
+    assert.equal(copy.caption,undefined);
+  }
+  const complex=cardCopy({mode:'complex',chains:{complex:values}});
+  assert.equal(complex.equations[0].axis,'z');assert.equal(complex.equations[0].lines.length,2);
 });
 
 test('language defaults and download details are local, bilingual and empty-safe',()=>{
