@@ -1,60 +1,47 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#F4EFE6"><meta name="description" content="照片化作线条，圆周重新描绘你。完全本地运行的 AI 线条画与双轴傅里叶人像。">
-  <title>圆周之间 · 以圆周，描绘你</title><link rel="icon" href="data:,">
-  <link rel="stylesheet" href="vendor/fonts/fonts.css">
-  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <meta name="theme-color" content="#F4EFE6"><meta name="description" content="A private, local Fourier portrait. Your photo never leaves your device.">
+  <title>Fourier Portrait · 圆周之间</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="vendor/fonts/fonts.css"><link rel="stylesheet" href="vendor/katex/katex.min.css"><link rel="stylesheet" href="style.css">
   <script defer src="vendor/katex/katex.min.js"></script><script defer src="qrcode.js"></script><script type="module" src="app.js"></script>
 </head>
 <body data-stage="landing" data-palette="ink">
-  <div class="grain" aria-hidden="true"></div>
-  <header><a class="brand" href="./"><span class="seal" aria-hidden="true">圆周</span><span>圆周之间<small>FOURIER PORTRAIT</small></span></a><nav><a href="#formula" id="formula-link">揭开公式 <span>↗</span></a><span class="private"><i></i> 影像不离开你的设备</span></nav></header>
+  <header><a class="brand" href="./"><span class="seal" aria-hidden="true">圆周</span><span data-zh="圆周之间">Fourier Portrait</span></a><nav><span class="private" data-zh="照片不离开你的设备">Your photo stays on your device</span><div class="languages" aria-label="Language"><button data-lang="zh">中文</button><span>/</span><button data-lang="en">EN</button></div></nav></header>
   <main>
-    <section class="observatory" id="observatory" aria-label="傅里叶人像创作室">
+    <section class="observatory" id="observatory">
       <div class="invitation">
-        <div class="eyebrow" id="chapter">A PORTRAIT WRITTEN IN ORBITS</div>
-        <h1 id="heading">每个人，<br>都有自己的<em>圆周。</em></h1>
-        <p class="story" id="story">让一张照片，化作一幅线条画。<br>再借无数个旋转的圆，慢慢将你唤回。</p>
-        <div class="landing-actions"><button class="primary" id="choose">上传你的照片 <span>↗</span></button><p class="upload-hint">也可拖入 JPG / PNG · 全程本地计算</p></div>
-        <div class="journey" aria-label="创作步骤"><span id="step-sketch">01 <b>凝成线条</b></span><span id="step-draw">02 <b>唤醒圆周</b></span><span id="step-result">03 <b>留住此刻</b></span></div>
-        <div class="working-actions"><button id="play" class="quiet">Ⅱ 暂停绘制</button><button id="skip" class="quiet">直接看完成图 ↗</button></div>
-        <div id="shared-controls" hidden><label for="shared-terms">拨动圆周，看轮廓从模糊到清晰 <output id="shared-count" for="shared-terms"></output></label><input id="shared-terms" type="range" min="1" max="1" value="1"></div>
-        <div class="result-actions"><button id="open-card" class="primary">制作我的公式分享卡 <span>↗</span></button><div><button id="download" class="quiet">↓ 保存人像 PNG</button><button id="replay" class="quiet">↻ 重新播放</button><button id="change" class="quiet">换一张照片 ↗</button></div><a id="shared-start" class="primary" href="./" hidden>生成我的素描画像 ↗</a></div>
-        <p id="status" class="status" role="status" aria-live="polite">正在点亮观星室…</p><button id="use-classic" class="quiet" hidden>无需等待 · 立即使用经典算法</button><p id="error" class="error" role="alert" hidden></p>
+        <span class="eyebrow" data-zh="以圆周，描绘你">A PORTRAIT WRITTEN IN ORBITS</span>
+        <h1 id="heading"></h1><p class="story" id="story"></p>
+        <div id="landing-actions"><button class="primary" id="choose" data-zh="上传你的照片 ↗">Upload your photo ↗</button><p class="hint" data-zh="或拖入 JPG / PNG · 全程本地计算">Or drop a JPG / PNG · Entirely on your device</p></div>
+        <section id="processing" class="processing" hidden aria-labelledby="processing-title">
+          <div class="processing-heading"><span class="eyebrow" data-zh="正在准备你的公式">PREPARING YOUR FORMULA</span><strong id="processing-percent"></strong></div>
+          <h2 id="processing-title"></h2>
+          <progress id="model-progress" max="100" value="0"></progress>
+          <div class="download-details"><span id="processing-bytes"></span><span id="processing-eta"></span></div>
+          <ol id="processing-steps"><li data-step="loading" data-zh="加载模型">Loading model</li><li data-step="matting" data-zh="分离背景">Removing background</li><li data-step="sketching" data-zh="生成素描">Sketching</li><li data-step="formula" data-zh="计算公式">Computing formula</li></ol>
+          <div class="matte-preview"><canvas id="matte-canvas" width="280" height="200"></canvas><div><b data-zh="让背景退去，让你留下">Less background.<br>More you.</b><p id="matte-note"></p></div></div>
+          <p class="hint" data-zh="圆周就绪便会先画；素描完成后轻轻落纸。">The circles start as soon as they can. The sketch joins when ready.</p>
+        </section>
+        <div id="working-actions" hidden><button id="play" class="quiet"></button><button id="skip" class="quiet" data-zh="直接看完成图 ↗">See the finished portrait ↗</button></div>
+        <div id="result-actions" hidden><button id="open-card" class="primary" data-zh="制作我的公式卡 ↗">Make my formula card ↗</button><div class="action-row"><button id="download" class="quiet" data-zh="↓ 保存画像 PNG">↓ Save portrait PNG</button><button id="replay" class="quiet" data-zh="↻ 重新播放">↻ Replay</button><button id="change" class="quiet" data-zh="换一张照片 ↗">Another photo ↗</button></div></div>
+        <a id="shared-start" class="primary" href="./" hidden data-zh="生成我的公式 ↗">Make mine ↗</a>
+        <p id="status" class="status" role="status" aria-live="polite"></p><p id="error" role="alert" hidden></p>
+        <section class="personal-formula" id="personal-formula" hidden>
+          <span class="eyebrow" data-zh="你的画像，写成公式">YOUR PORTRAIT, IN EQUATIONS</span><h2 data-zh="原来，公式也是一张脸。">An equation is a face.</h2>
+          <div id="formula-preview" class="formula"></div><p id="formula-count"></p>
+          <div id="creator-formula-actions"><label for="terms"><span data-zh="圆周数量（每轴）">Circles per axis</span> <output id="terms-value"></output></label><input id="terms" type="range" min="1" max="1800" value="1200"><button id="restore-auto" class="quiet" data-zh="恢复自动">Use automatic N</button><div class="action-row"><button id="download-formula" class="quiet" data-zh="↓ 保存公式 (LaTeX)">↓ Save formula (LaTeX)</button><button id="copy-formula" class="quiet" data-zh="复制公式">Copy formula</button></div><p id="formula-status" role="status"></p></div>
+          <div id="shared-controls" hidden><label for="shared-terms" data-zh="拨动圆周，看轮廓从模糊到清晰">Move the slider. Watch the face take shape.</label><output id="shared-count"></output><input id="shared-terms" type="range" min="1" max="1" value="1"></div>
+        </section>
       </div>
-      <div class="instrument">
-        <div class="instrument-top"><span class="eyebrow">THE CELESTIAL PLOTTER</span><span class="edition">N° 001 / 本地观测</span></div>
-        <div class="mode-tabs" aria-label="傅里叶绘制模式"><button data-mode="xy" aria-pressed="true">双轴 XY</button><button data-mode="complex" aria-pressed="false">复平面单链</button></div>
-        <div class="view-tabs" id="view-tabs" aria-label="查看创作阶段"><button data-view="photo" aria-pressed="false">原图</button><button data-view="sketch" aria-pressed="false">线条画</button><button data-view="fourier" aria-pressed="true">傅里叶绘制</button></div>
-        <div id="result-views" class="result-views" role="group" aria-label="画像呈现方式" hidden><button data-result-view="sketch" aria-pressed="false">素描</button><button data-result-view="lines" aria-pressed="false">傅里叶线条</button><button data-result-view="overlay" aria-pressed="true">叠加</button></div>
-        <div class="lens"><div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div><span class="cardinal north" aria-hidden="true">✦</span><span class="cardinal south" aria-hidden="true">∞</span><canvas id="canvas" width="900" height="900" aria-label="人像、线条画与傅里叶圆周画布"></canvas></div><span class="lens-note" id="lens-note">每一笔，都是圆的回声</span>
-        <div class="instrument-bottom"><span id="source-label">示例 / 约瑟夫·傅里叶</span><span id="progress">00%</span></div><div class="progress-track"><div id="progress-bar"></div></div>
-      </div>
+      <div class="instrument"><div class="instrument-top"><span class="eyebrow" data-zh="圆周绘图仪">THE ORBITAL PLOTTER</span><span class="eyebrow">N° 001 / XY</span></div><div class="lens"><canvas id="canvas" width="900" height="900" aria-label="Fourier portrait / 傅里叶画像"></canvas></div><div class="instrument-bottom"><span id="source-label"></span><span id="progress">00%</span></div><progress id="drawing-progress" max="1" value="0"></progress><p class="lens-note" data-zh="每一笔，都是圆的回声">Every line, an echo of a circle.</p></div>
       <input id="upload" type="file" accept="image/jpeg,image/png" hidden>
-      <div class="drop-message" aria-hidden="true">把照片放在这里，让圆周记住你。</div>
     </section>
-    <section class="sample-gallery" aria-label="名人肖像样例"><div class="gallery-heading"><span class="eyebrow">OR BORROW A FAMILIAR FACE</span><p>也可从一位熟悉的面孔开始</p></div><div id="samples" class="samples"></div></section>
-    <details class="advanced" id="advanced"><summary><span>微调这场相遇 <small>线条、圆周与时间</small></span><span class="plus">＋</span></summary><div class="advanced-grid">
-      <label class="control" for="model-style"><span>傅里叶轮廓算法</span><select id="model-style"><option value="contour">清晰轮廓 · AI</option><option value="anime">柔和线条 · AI</option><option value="classic">经典算法 · XDoG</option></select><small>素描单独保留光影；此项只调整圆周描线。经典算法无需模型。</small></label>
-      <label class="control" for="style"><span>线条风格 / 粗细 <output id="style-value">50</output></span><input id="style" type="range" min="0" max="100" value="50"><small>轻细刻线 → 柔厚墨线（XDoG）</small></label>
-      <label class="control" for="detail"><span>轮廓细节 <output id="detail-value">50</output></span><input id="detail" type="range" min="0" max="100" value="50"><small>保留更短笔画与更细的明暗变化</small></label>
-      <label class="control" for="terms"><span>旋转圆数量（每链） <output id="terms-value">自动</output></span><input id="terms" type="range" min="1" max="1800" value="1200"><small id="auto-label">自动选择圆数量</small></label>
-      <button id="restore-auto" class="quiet" hidden>恢复自动</button>
-      <label class="control" for="speed"><span>绘制速度 <output id="speed-value">1.0×</output></span><input id="speed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
-      <label class="toggle"><input id="original" type="checkbox" role="switch"><span>淡淡叠加原图</span></label><label class="toggle"><input id="circles" type="checkbox" role="switch" checked><span>显示旋转圆</span></label><button id="download-sketch" class="quiet">↓ 保存线条画 PNG</button><button id="crop" class="quiet">⌗ 调整取景（拖选保留区域）</button>
-    </div></details>
-    <section class="personal-formula" id="personal-formula" hidden><span class="eyebrow">YOUR PORTRAIT, IN EQUATIONS</span><h2>把你的星轨，写成公式。</h2><div id="formula-preview" class="formula"></div><p id="formula-count"></p><button id="download-formula" class="quiet">↓ 保存公式 (LaTeX)</button><button id="copy-formula" class="quiet">复制公式</button><p id="formula-status" role="status"></p></section>
-    <section class="formula-section" id="formula"><details id="formula-details"><summary><div><span class="eyebrow">THE POETRY IS MATHEMATICS</span><h2>所谓神秘，不过是圆周的低语。</h2></div><span class="formula-invite">揭开公式 <b>＋</b></span></summary><div class="formula-content">
-      <p class="formula-intro">一幅肖像，先成为墨线，再成为复数，最后成为旋转。<br>Fourier series, one orbit at a time.</p>
-      <article><h3>双轴 XY：让两束光，相遇成你</h3><p>分别对实数序列 xₙ、yₙ 做 DFT，按各自幅值排序。上方链的水平投影给出 x，左侧链旋转 π/2 后的纵向投影给出 y；竖直与水平虚线的交点就是画笔。</p><div class="formula" data-tex="X_k=\frac1N\sum_{n=0}^{N-1}x_n e^{-2\pi i kn/N},\quad Y_k=\frac1N\sum_{n=0}^{N-1}y_n e^{-2\pi i kn/N}">Xₖ = DFT(xₙ), Yₖ = DFT(yₙ)</div><div class="formula" data-tex="x(t)=\operatorname{Re}\sum_k X_k e^{2\pi i kt}=\sum_k |X_k|\cos(2\pi kt+\arg X_k)">x(t) = Σ |Xₖ| cos(2πkt + arg Xₖ)</div><div class="formula" data-tex="y(t)=\operatorname{Re}\sum_k Y_k e^{2\pi i kt}=\sum_k |Y_k|\cos(2\pi kt+\arg Y_k)">y(t) = Σ |Yₖ| cos(2πkt + arg Yₖ)</div></article>
-      <div class="math-grid"><article><span class="step">I / 从照片到线条</span><h3>把轮廓，写成复数</h3><p>AI 将照片化作黑白线条，经细化、笔画描摹与简化，按最近端点连接，沿弧长均匀采样。横坐标为实部，纵坐标为虚部。</p><div class="formula" data-tex="z_n=x_n+i y_n">zₙ = xₙ + i yₙ</div></article><article><span class="step">II / 从线条到圆周</span><h3>在频率中，找到秩序</h3><p>离散傅里叶变换（DFT）为每个频率计算复系数。幅值是半径，相位是起始角度，正负频率决定旋转方向。</p><div class="formula" data-tex="c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N}">cₖ = (1/N) Σ zₙ e^(−2πikn/N)</div></article><article><span class="step">III / 从圆周到你</span><h3>让简单，叠加成复杂</h3><p>按幅值由大到小选取 M 项组成 K_M。圆首尾相接，末端写出重建轨迹。更多的圆，带回更多细节。</p><div class="formula" data-tex="z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt}">z(t) ≈ Σ cₖ e^(2πikt)</div></article></div>
-      <div class="legend"><span><b>|cₖ|</b> 圆的半径</span><span><b>arg(cₖ)</b> 初始相位</span><span><b>k</b> 旋转频率</span><span><b>t ∈ [0, 1]</b> 一次完整描绘</span></div><div class="coefficient-panel"><div><span class="eyebrow">A FEW ORBITS, UP CLOSE</span><p>此刻画布中，最大的几个圆</p></div><div id="coefficients"></div></div>
-      <p class="caveat">这不是人脸识别，而是一条闭合路径的近似。笔画间移动时抬笔，避免连接线穿过面孔；背景简洁、光线清晰的照片更适合。<br>默认线条画：<a href="https://github.com/carolineec/informative-drawings">informative-drawings</a>（Chan 等，CVPR 2021，MIT） · <a href="https://huggingface.co/x-Liola-x/informative-drawings-onnx">x-Liola-x ONNX 导出</a> · <a href="https://github.com/microsoft/onnxruntime">onnxruntime-web</a>（MIT） · 备用 XDoG · 笔画描摹：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw</a>（MIT）</p>
-    </div></details></section>
-    <section class="privacy-note"><span aria-hidden="true">⌑</span><div>你的照片，只属于你。<p>没有上传，没有存储。所有绘制都发生在这台设备的浏览器里。</p></div></section>
+    <section class="sample-gallery"><div><span class="eyebrow" data-zh="从熟悉的面孔开始">BORROW A FAMILIAR FACE</span><h2 data-zh="先与他们的公式相遇">Meet their equations first</h2></div><div id="samples" class="samples"></div></section>
+    <details class="about"><summary data-zh="为什么圆能画出一张脸？">How can circles draw a face?</summary><p data-zh="照片在本地变成素描。轮廓被均匀采样，再用离散傅里叶变换分解成旋转的圆。上方圆链给出 x(t)，左方圆链给出 y(t)，投影的交点就是画笔。自动 N 保留细节；笔画间移动时抬笔。">Your photo becomes a local sketch. Contours are sampled evenly and a discrete Fourier transform turns them into rotating circles. The top chain gives x(t); the left gives y(t). Their projections meet at the pen. Automatic N preserves detail, and the pen lifts between strokes.</p><p data-zh="分享链接只包含公式系数与抬笔数据，不含照片或素描。背景简洁、光线清晰的肖像效果更好。">Share links contain only coefficients and pen lifts, never your photo or sketch. Clear portraits with simple backgrounds work best.</p></details>
+    <p class="privacy-note" data-zh="你的照片，只属于你。没有上传，没有服务器存储。">Your photo belongs to you. No uploads. No server storage.</p>
   </main>
-  <dialog id="card-dialog" aria-labelledby="card-title"><div class="card-heading"><div><span class="eyebrow">A LITTLE MATHEMATICS. ALL YOURS.</span><h2 id="card-title">把这一刻，分享给世界。</h2></div><button id="close-card" class="quiet" aria-label="关闭分享卡片">✕</button></div><div class="card-editor"><div class="card-preview"><img id="card-preview" alt="你的傅里叶公式分享卡片预览"></div><div class="card-options"><label>为画像署名（可选）<input id="card-name" maxlength="32" placeholder="你的名字 / 昵称"></label><label>纸与墨<select id="card-palette"><option value="ink">墨白朱印</option><option value="navy">星图蓝</option><option value="silver">月光银</option></select></label><label class="guess-toggle"><input id="card-guess" type="checkbox">猜猜我是谁<span>卡片不署名，画完才揭晓；名字仍在链接中，并非加密。</span></label><label>卡片比例<select id="card-format"><option value="34">3:4 · 小红书 / 朋友圈</option><option value="916">9:16 · Story</option></select></label><p>照片留在你的设备。二维码只携带数学系数，让朋友看到圆周如何画出你。</p><button id="save-card" class="primary">↓ 保存分享卡片</button><button id="system-share" class="quiet">系统分享 ↗</button><button id="copy-link" class="quiet">复制链接</button><input id="share-url" readonly aria-label="画像分享链接"><p id="card-status" role="status"></p></div></div></dialog>
-  <footer><span>圆周之间 <i>·</i> MADE OF CIRCLES & CURIOSITY</span><span>样例肖像：<a href="#sample-credits" id="credits-link">Wikimedia Commons · 公有领域</a></span><details id="sample-credits"><summary>查看肖像来源与鸣谢</summary><div id="credits"></div><p><a href="https://github.com/carolineec/informative-drawings">informative-drawings · Chan et al., CVPR 2021</a> · <a href="https://huggingface.co/x-Liola-x/informative-drawings-onnx">x-Liola-x ONNX</a> · <a href="https://github.com/microsoft/onnxruntime">onnxruntime-web</a>（均为 MIT）<br>XDoG / Winnemöller et al. 2012 · 笔画连接灵感：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw (MIT)</a> · QR: Kazuhiko Arase（MIT）</p></details></footer>
+  <dialog id="card-dialog" aria-labelledby="card-title"><div class="card-heading"><div><span class="eyebrow" data-zh="一点数学，全都是你">A LITTLE MATHEMATICS. ALL YOURS.</span><h2 id="card-title" data-zh="我的傅里叶公式">My Fourier Formula</h2></div><button id="close-card" class="quiet" aria-label="Close / 关闭">✕</button></div><div class="card-editor"><div class="card-preview"><img id="card-preview" alt="Formula card / 公式卡"></div><div class="card-options"><label><span data-zh="署名（可选）">Nickname (optional)</span><input id="card-name" maxlength="32"></label><label class="check"><input id="card-guess" type="checkbox"><span data-zh="猜猜我是谁 · 画完揭晓">Guess who · Reveal after drawing</span></label><label><span data-zh="卡片比例">Card ratio</span><select id="card-format"><option value="34">3:4</option><option value="916">9:16</option></select></label><button id="save-card" class="primary" data-zh="↓ 保存公式卡">↓ Save formula card</button><button id="system-share" class="quiet" data-zh="分享卡片 ↗">Share card ↗</button><button id="copy-link" class="quiet" data-zh="复制分享链接">Copy share link</button><input id="share-url" readonly aria-label="Share URL / 分享链接"><p id="card-status" role="status"></p></div></div></dialog>
+  <footer><span>FOURIER PORTRAIT · <span data-zh="圆周之间">MADE OF CIRCLES & CURIOSITY</span></span><details><summary data-zh="样例来源与模型鸣谢">Portrait sources & model credits</summary><div id="credits"></div><p><a href="https://github.com/xuebinqin/U-2-Net">U²-Net (Apache-2.0)</a> · <a href="https://github.com/carolineec/informative-drawings">informative-drawings (MIT)</a> · <a href="https://github.com/ZHKKKe/MODNet">MODNet (Apache-2.0)</a> · YuNet (MIT) · ONNX Runtime (MIT) · linedraw (MIT) · QR / Kazuhiko Arase (MIT)</p></details></footer>
 </body></html>

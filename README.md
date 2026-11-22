@@ -1,133 +1,57 @@
 # 圆周之间 · Fourier Portrait
 
-无需构建、完全在浏览器内运行的傅里叶人像绘图工具。默认宣纸、墨线与朱印，中文界面，支持手机。原生 HTML / CSS / ES 模块，无运行时框架或服务端。
+## 中文
 
-## 人像素描与圆周轮廓
+完全静态、全程本地的傅里叶人像工具。照片不上传，不需要 API 或服务端。默认宣纸、墨线与朱印；支持桌面和手机。
 
-默认采用混合呈现：U²-Net portrait q8 保留发丝、明暗的原始人像素描；已有 contour 管线独立生成傅里叶路径，自动 N 和线条质量不因素描而改变。绘制时素描随进度渐显，完成后可切换「素描 / 傅里叶线条 / 叠加」，默认叠加。保存人像 PNG 会保存所选视图；保存线条画 PNG 会保存按当前配色着色的素描。
+### 使用
 
-分享卡以完整素描为主图；公式与二维码仍只包含傅里叶轮廓，不包含素描或照片。访客页仅重建圆周线条，并提示「完整素描保存在 TA 的卡片里」。三套配色均沿用此行为。
+运行 `python3 -m http.server 8080`，通过 http://localhost:8080 打开（ES 模块需要 HTTP，不能直接双击 HTML）。整个目录可部署到 GitHub Pages。
 
-U²-Net q8 模型为自托管的 44.23MB ONNX，Apache-2.0（见 `models/U2NET-LICENSE.txt`）。与现有模型同用 ML Worker、下载进度及 Cache API。轮廓准备完成就开始圆周绘制，不等待 U²-Net；素描稍后到达时平滑淡入，卡片会自动更新。切换照片会取消旧任务，旧素描不会覆盖新照片。上传仍沿用原有 MODNet/YuNet 的复杂背景判断及取景；素描层始终应用 MODNet 蒙版，即使轮廓使用干净照片原流程；加上柔和边缘后以正片叠底融入宣纸（深色配色使用浅墨滤色）。素描失败时保留 contour，contour 失败时回退 XDoG。六个样例已有 512px 预绘素描，无需等待模型。高级设置的「傅里叶轮廓算法」只控制圆周轮廓；经典算法不运行模型。
+1. 上传 JPG / PNG、拖入照片，或选择六个公有领域名人样例。
+2. 显著的处理面板显示实际模型下载字节 / MB、四个处理步骤和粗略剩余时间。背景分离后显示真实 MODNet 遮罩的渐隐预览；尚未生成时明确显示为原图预览。网络估算基于当前下载速率，本地计算仅显示粗略范围。
+3. 圆周轮廓就绪后先开始双轴 XY 绘制；素描继续在 Worker 中生成，处理面板保持可见，直到素描到达或回退。缓存模型可直接进入本地处理。
+4. 完成后自动呈现素描与傅里叶线条叠加的唯一结果；保存 PNG 即保存这一结果。可暂停、跳到完成、重播或换图。
+5. 公式面板提供自动 N、唯一的手动圆数滑块、真实系数预览和完整 LaTeX 导出。中文文件使用 XeLaTeX 编译。开启系统「减少动态效果」会跳过旋转动画。
+6. 公式卡可选 3:4 / 9:16 和昵称。卡片主角是你的真实 x(t)、y(t) 系数，不展示你的照片或素描；约瑟夫·傅里叶的小素描是明确标记的示例。二维码只传数学系数，扫码看圆周画出你。
 
-## 使用
+顶部「中文 / EN」根据浏览器语言初始化，选择保存在 localStorage，更新 HTML lang；访客沿用自己的语言，不在分享数据中编码语言。访客绘制时同步显示公式，完成后可调整圆数并点击「生成我的公式」。
 
-在本目录执行 `python3 -m http.server 8080`，访问 http://localhost:8080 。因为使用 ES 模块，请通过 HTTP 打开，而非双击 HTML 文件。
+### 模型与隐私
 
-1. 首页默认以傅里叶本人的肖像演示。点击「上传你的照片」或拖入本地 JPG / PNG；也可选择傅里叶、爱因斯坦、牛顿、居里夫人、欧拉或高斯。
-2. 照片先渐变成黑白 **AI 线条画**，再显现等距轮廓点，最后唤醒圆周并绘制。可随时切换「原图 / 线条画 / 傅里叶绘制」。默认「清晰轮廓」，也可选「素描线稿」或无需模型的「经典算法」。
-3. 绘制时可暂停/继续或直接看完成图。结果页可重新播放、保存人像 PNG 或换照片。
-4. 展开「微调这场相遇」：调整线条风格/粗细、轮廓细节（松开重新处理）、圆数量（从头重绘）、速度，以及原图叠加和旋转圆。也可单独下载黑白线条画 PNG。扫描拼图或复杂背景可点击「调整取景」，在原图上拖选需要的区域（手机也支持），再运行完整绘制；换图即可回到未裁剪原图。
-5. 向下展开公式，或点击「揭开公式」，可查看数学说明及当前幅值最大的四个傅里叶系数。
+U²-Net portrait q8（44.23MB，Apache-2.0）仅作素描层。contour 与 XDoG 回退保留原有傅里叶路径质量与自动 N。复杂背景使用 YuNet / MODNet 取景；素描层始终尝试 MODNet 抠图与柔和边缘。素描失败时保留 contour，contour 失败时使用 XDoG。模型、ORT、字体和二维码库全部自托管，使用 Cache API 缓存；第一次上传需要下载模型，样例无需下载模型。
 
-系统开启「减少动态效果」时，不循环播放首页，不旋转绘制，缩短转场并直接呈现结果。保存人像 PNG 不含原图、星尘或辅助圆；线条画导出为白底黑线。
+分享链接只含系数、笔画抬笔数据、尺寸、可选昵称与猜谜标记；不含照片或素描，且语言选择不进入载荷。持有链接的人可以查看和转发画像，**这不是加密**。新卡片固定墨白配色，旧 navy / silver 分享仍可解码并沿用原配色。数字 `#n` 及旧 `#p=` 链接均兼容。
 
-建议使用背景简洁、对比清晰的肖像。无边缘或损坏图片会显示中文提示。非常大的图片解码仍可能受设备内存限制。
+## English
 
-## 数学与处理流程
+A completely static, private Fourier portrait app. Your photo never leaves your browser. No API, backend or build step. Rice paper, ink and a vermilion seal; responsive on desktop and mobile.
 
-### 分享你的公式画像
+### Use
 
-完成后点击「制作我的公式分享卡」，可选昵称（最多 16 个字符）、3:4（1080×1440）或 9:16（1080×1920），以及「墨白朱印 / 星图蓝 / 月光银」配色。选择同时更新创作室、卡片与扫码访客页；墨白使用深色二维码与无纹理宣纸静区，深色主题使用冷白二维码。卡片重新渲染高分辨率完整肖像、公式摘录和本地生成的二维码，可保存 PNG、系统分享（支持文件时）或复制链接。QR 编码器为本地 vendored [kazuhikoarase/qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)（MIT），不依赖 QR CDN。
+Run `python3 -m http.server 8080` and open http://localhost:8080 (ES modules require HTTP). Deploy this directory directly to GitHub Pages.
 
-扫码链接的 fragment 仅含数学系数、笔画抬笔位图、尺寸和可选昵称，不含照片，也不上传到服务器。**这不是加密**：持有链接的人可以查看与转发画像，请勿在昵称写入隐私信息。新卡片固定使用 `https://omygpt.github.io/fourier-portrait/#n…`，即使在本地制作也不会生成 localhost 二维码。验证时可把同一 fragment 放到本地页面，正式访问需要先部署支持新格式的版本。
+1. Upload/drop a JPG or PNG, or choose one of six public-domain samples.
+2. A prominent processing panel shows real model download bytes / MB, four processing steps and a rough ETA. An actual MODNet subject mask fades away the background once available; until then, the image is labeled as an original preview. Download estimates use the current transfer rate; compute estimates are deliberately approximate.
+3. XY circles begin when contours are ready. The worker keeps computing the sketch, and the processing panel remains visible until it arrives or falls back. Cached models proceed directly to local computation.
+4. One best final overlay is shown automatically. The PNG download is that overlay. Pause, skip, replay or choose another photo.
+5. The formula panel offers automatic N, one optional manual circle-count slider, actual coefficient previews and full LaTeX export. English exports compile with pdfLaTeX or XeLaTeX. System reduced-motion preferences skip the animation.
+6. Choose a 3:4 or 9:16 formula card and an optional nickname. The hero is your actual x(t), y(t), not your photo or sketch. The small Joseph Fourier sketch is explicitly labeled as an example. Scan the QR to watch circles draw your portrait.
 
-二进制载荷使用 v2：模式、采样数和尺寸、幅值标尺、能量比例、昵称、完整抬笔位图，以及频率增量 varint、平方根幅值 uint8、相位 uint8。XY 利用实数共轭对减少体积，自托管 [fflate 0.8.2](https://github.com/101arrowz/fflate)（MIT，`vendor/fflate/LICENSE`）做 DEFLATE。仍可读取旧的 `#p=<base64url>` v1/v2 链接。
+The header's 中文 / EN toggle defaults from the browser, persists in localStorage and updates HTML lang. Visitors use their own language; no language is added to the payload. Their formula is visible while the portrait forms. Adjust the circle count and select **Make mine**.
 
-v2 选项字节 bit 0 为猜谜，bits 1–2 为配色（0 墨白、1 星图蓝、2 月光银）；其他值拒绝。未携带配色的旧链接默认墨白。原有传输与系数量化不变，猜谜与昵称独立于配色。
+### Models & privacy
 
-新传输格式为 `#n<十进制数字>`：首位为尾组字节数（总字节数模 5），每 5 字节按大端无符号整数写成固定 13 位十进制数（含前导零）；尾组 1/2/3/4 字节分别写成 3/5/8/10 位，无尾组则不写。数字长度与尾组数联合确定原始长度，解码校验范围和填充。二维码把 URL 前缀作为 Byte 段、数字载荷作为 Numeric 段，利用每 3 数字约 10 bit 的编码，而不是把数字再当普通文本。按 v10–26 的段头开销及实际压缩后比特数控制 5760 bit 预算，目标 QR ≤ v18，不再以 URL 字符数限制细节。卡片仍用完整系数；扫码版保留能量优先的系数，可能省略微小细节。
+The self-hosted U²-Net portrait q8 model is 44.23MB (Apache-2.0), used only for the sketch layer. The existing contour pipeline and XDoG fallback independently preserve Fourier quality and automatic N. YuNet / MODNet frame complex backgrounds; the sketch always attempts MODNet masking and soft paper edges. Sketch failures retain contours; contour failures use XDoG. Models, ORT, fonts and QR generation are all self-hosted. Model downloads use Cache API; pre-baked samples need no model downloads.
 
-卡片保留 72px 内容边距、细框角标、画像背后的淡轨道与刻度；9:16 单独扩大画像并留出题句空间。默认宣纸带轻微颗粒，朱印为「圆周」，画像使用墨线；另有冷白星图蓝及银白月光银。标题「我由 N 个圆组成」以及主频率、最大半径来自当前实际系数；公式使用本地 KaTeX 字体排版真实下标与数值前两项。二维码与画像共用实色，无模块发光；v18 的符号为 356px，每模块固定 4px，含完整四模块纯色静区共 388px，静区内没有纹理或装饰。建议分享原始 PNG，避免反复缩放和 JPEG 压缩。验收使用 OpenCV 的 WeChat QR 解码器读取原始卡片、720px 缩图，以及 720px + Gaussian σ=0.6px + 3° 旋转 + JPEG quality 70 的模拟拍摄图，不等同于实体微信扫码测试。
+Share links contain only coefficients, pen lifts, dimensions, an optional nickname and a guessing flag—never photos or sketches. **This is not encryption:** anyone with a link can view and forward the portrait. New cards use ink. Old navy/silver visitors retain their stored palette. Both numeric `#n` and legacy `#p=` shares remain supported. Language is intentionally not encoded.
 
-卡片弹窗可选「猜猜我是谁」（默认关闭）：卡片不显示昵称，访客绘制时显示「猜猜这是谁？」，完成后柔和揭晓署名；系统减少动态效果时直接呈现。v2 载荷原保留字节的 bit 0 记录此选项，不增加头部长度；旧 v1/v2 链接按普通分享显示，未知选项会被拒绝。昵称仍包含在链接中，猜谜是互动玩法，不是加密或匿名保护。
+## Technical notes / 技术说明
 
-分享页顶部先展示画像，不展示创作者工具；绘制完成后可拖动圆数量滑块，按幅值从少到多即时重建（保留原笔画抬笔），再点击「我也画一张」回到不含 fragment 的首页。重播恢复完整分享系数并重新隐藏猜谜署名。LaTeX 下载保留完整当前系数，不受二维码预算影响。XY 两链保留一致坐标比例，避免单独放大某条链导致画像变形；通过固定等宽轴区、线宽/亮度和标签平衡视觉权重。
-
-### 双轴计算与自动项数
-
-分享访客的完成图采用链接中指定的配色，线色、线宽和辉光与卡片一致（墨白不发光），画布按显示尺寸和设备 DPR 重建；至少 7200 个采样点，并按设备像素增加密度。抬笔仍来自链接中的原始笔画位图，不按低项数曲线速度重新猜测；仅修复归一化画布中不超过 12px、两端切线一致且弧长受限的微小接缝，大跨度和转角抬笔保持断开。说明文字放在画布下方，不覆盖画像。
-
-默认「双轴 XY」：分别对实数序列 xₙ、yₙ 计算 DFT，按各自幅值排序。上方圆链角度偏移为 0，水平投影给出 x(t)；左侧圆链偏移 π/2，纵向投影给出 y(t)。两条琥珀色虚线交点就是画笔，笔画间抬笔时圆链仍继续运动。可切换「复平面单链」保留原来的复数绘制。圆数量滑块应用于每条链；两种模式均支持原图叠加、隐藏圆、速度和 PNG 导出。
-
-$$X_k=\frac1N\sum_n x_n e^{-2\pi i kn/N},\quad Y_k=\frac1N\sum_n y_n e^{-2\pi i kn/N}$$
-$$x(t)=\operatorname{Re}\sum_k X_ke^{2\pi ikt}=\sum_k|X_k|\cos(2\pi kt+\arg X_k)$$
-$$y(t)=\operatorname{Re}\sum_k Y_ke^{2\pi ikt}=\sum_k|Y_k|\cos(2\pi kt+\arg Y_k)$$
-
-每张新图片自动为 X、Y 和复数模式分别选择最少项数（至少 8 项，最多为现有项数）：累计能量 ≥99%，且在采样路径上平均重建误差 ≤1.5px。误差采用最长边 590px 的统一参考绘图尺度，双轴布局实际可能更小，因此这一误差标准更保守。手动调整后可点击「恢复自动」。自动的 X、Y 项数可不同，手动滑块则同时指定每条链的项数。
-
-结果下方预览每链前 8 项，可「保存公式 (LaTeX)」下载当前模式和当前项数的完整数值公式，也可「复制公式」复制方程体。文件使用 article、ctex 和 amsmath，请用 **XeLaTeX** 编译。系数约三位有效数字，实际绘制使用未舍入系数；长公式按项分行。PNG 只保存已画轨迹，不含圆链、导线或原图。
-
-默认：白色补边为正方形 → 等比缩放至 512×512 → informative-drawings（contour / anime，RGB float32 NCHW）→ 裁掉补边、还原原图比例并将最长边缩至 400px → Otsu 自适应阈值与细节偏移 → 连通区域去碎点 → Zhang–Suen 细化 → 8 邻域笔画描摹（保留闭环、在分叉处分段）→ 去除短笔画 → Ramer–Douglas–Peucker 简化 → 贪心最近端点排序（允许反转）→ 闭合路径沿弧长均匀重采样为 1800 点 → DFT。细节滑块同时调节阈值和最短笔画长度，抑制服装纹理。AI 模式使用中央偏上的椭圆形肖像先验，保留更短的眼鼻笔画，外围采用更强过滤；这不是人脸检测，偏离中央的肖像可先调整取景。
-
-六位名人的两种 AI 线稿已预计算为 `samples/*-contour.png` / `*-anime.png`，选择样例不需要下载模型。上传或裁剪照片时才懒加载本地模型，Worker 里优先尝试 WebGPU，设备不支持时使用单线程 WASM。细化、笔画排序、DFT 和自动 N 的计算也放在独立 Worker 中，避免阻塞界面。首次模型下载显示百分比；Cache API 保存的只是公共模型，不保存照片；第二次访问可复用，当前会话也复用推理 Session。30 秒超时或模型失败自动退回 XDoG，也可点击「无需等待 · 立即使用经典算法」。
-
-`models/` 两个 fp32 模型各约 17MB（均小于 GitHub Pages 单文件 100MB），保留已验证的 WASM 数值与画质，未做未验证的 fp16/int8 转换。onnxruntime-web 1.20.1 与实际使用的 JSEP WASM/MJS 自托管于 `vendor/ort/`，模型、运行时、KaTeX、QR 与 UI 字体均不依赖 CDN。总静态资源约 58MB；字体为 UI 字符子集，昵称中其他字符使用系统字体。预计算使用相同补边/裁剪与 fp32 模型，构建产物已经入库，无需在部署时运行 Python。
-
-备用的经典 XDoG 采用 Winnemöller 等（2012）的扩展高斯差分思想，归一化亮度为 I：
-
-$$D=(1+p)(G_\sigma * I)-p(G_{k\sigma}*I)$$
-
-$$T(D)=\begin{cases}1&D\ge\epsilon\\1+\tanh(\phi(D-\epsilon))&D<\epsilon\end{cases}$$
-
-经典模式以 0.5 二值化为黑白素描，再将去除短碎线、简化后的笔画重绘为干净的白底黑线，作为可预览和下载的线条画。「线条风格/粗细」在经典模式联动 sigma、k、p、epsilon、phi，在 AI 模式联动二值化阈值；「轮廓细节」同时调节阈值和最短笔画长度。没有服务器 API 或 OpenCV 依赖。笔画描摹与最近端点排序思路启发自 [LingDong-/linedraw](https://github.com/LingDong-/linedraw)（MIT，Copyright © 2017 Lingdong Huang），阅读其 `linedraw.py` 与 `strokesort.py` 后独立实现；未引入 Python 运行时依赖。
-
-把轮廓点视作复数：
-
-$$z_n=x_n+i y_n$$
-
-离散傅里叶系数：
-
-$$c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N},\quad k=-\lfloor N/2\rfloor,\ldots,\lceil N/2\rceil-1$$
-
-按系数幅值降序排列，选前 M 项（集合记作 K_M）：
-
-$$z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt},\quad t\in[0,1]$$
-
-其中 $|c_k|$ 是圆半径，$\arg(c_k)$ 是初始相位，$k$ 为旋转频率，正负表示相反方向。零频项对应整体位置。保留越多项，越接近原始采样轮廓。页面用 KaTeX 渲染公式，无网络时仍显示文字公式。
-
-这是单路径近似，并非语义人脸识别。笔画之间的移动仍属于闭合路径与 DFT；绘制时在已标记的跨笔画连接段抬笔，减少难看的直线穿越（不是对连接段另做傅里叶变换）。低项数仍可能偏离原始线条。最近端点排序和直接 DFT 都有二次复杂度，因此限制采样数量。图像坐标 y 轴向下，与教科书复平面的视觉旋转方向相反，但公式一致。
-
-## 名人肖像与鸣谢
-
-以下 Wikimedia Commons 图像均标记为公有领域。仓库仅含压缩肖像与缩略图，选择样例也运行与上传相同的线条画和傅里叶流程。没有把测试照片打包进项目。
-
-| 人物 | 来源 |
-| --- | --- |
-| 傅里叶 | [Fourier2.jpg](https://commons.wikimedia.org/wiki/File:Fourier2.jpg) |
-| 爱因斯坦 | [Albert_Einstein_Head.jpg](https://commons.wikimedia.org/wiki/File:Albert_Einstein_Head.jpg) |
-| 牛顿 | [GodfreyKneller-IsaacNewton-1689.jpg](https://commons.wikimedia.org/wiki/File:GodfreyKneller-IsaacNewton-1689.jpg) |
-| 居里夫人 | [Marie_Curie_c1920.jpg](https://commons.wikimedia.org/wiki/File:Marie_Curie_c1920.jpg) |
-| 欧拉 | [Leonhard_Euler.jpg](https://commons.wikimedia.org/wiki/File:Leonhard_Euler.jpg) |
-| 高斯 | [Carl_Friedrich_Gauss_1840_by_Jensen.jpg](https://commons.wikimedia.org/wiki/File:Carl_Friedrich_Gauss_1840_by_Jensen.jpg) |
-
-## AI 模型与运行时鸣谢
-
-上传先在同一个 Worker 中运行 YuNet（640px、BGR）与 MODNet q8（512px、RGB -1…1）。人脸裁切留出头发、下巴与肩部余量；仅当人物 matte 外的边缘密度和边缘占比同时超过阈值才抠去背景。任何预处理模型下载或推理失败都回到原图描线；描线模型失败仍可回退 XDoG。模型使用 Cache API 按公共资源 URL 缓存，有阶段提示，也可手动取消。图像及 matte 不持久存储。
-
-干净背景（包括黑白老照片）或未检出人脸时完全沿用 main 的原始输入、描线与笔画分析，不做自动裁切或 120 笔画筛选。六个名人的两种 `samples/*-{contour,anime}.png` 恢复为 main 的预绘资源，元数据标记为 `original`，样例无需下载模型。
-
-只有复杂背景的人像才应用增强：保留原图顶部和完整横向范围，向下留出肩部，必要时白色补边，目标脸框占画面高度约 35%。YuNet 的双眼、鼻尖与嘴角映射为眼眉、鼻和嘴部保护区；这些区域的笔画不按长度或重要性丢弃、不参与端点合并，也不做外围平滑。保护笔画不受 120 条上限限制，其余轮廓才采用保守切线合并与优先级筛选。对照验收同时比较自动 N 的最终傅里叶画像，而不只看原始线稿。
-
-- [carolineec/informative-drawings](https://github.com/carolineec/informative-drawings)，Chan et al., CVPR 2021，MIT（见 `models/LICENSE`）。
-- [x-Liola-x/informative-drawings-onnx](https://huggingface.co/x-Liola-x/informative-drawings-onnx)，MIT，提供 contour512 / anime512 ONNX 导出。运行时仅访问本仓库 `models/`，不访问 HuggingFace。
-- [onnxruntime-web](https://github.com/microsoft/onnxruntime)，Microsoft，MIT（见 `vendor/ort/LICENSE`）。
-- [MODNet](https://github.com/ZHKKKe/MODNet) / [Xenova/modnet](https://huggingface.co/Xenova/modnet)，约 6.6MB 量化 ONNX，Apache-2.0（`models/MODNET-LICENSE.txt`）。
-- [OpenCV Zoo YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)，约 233KB，MIT（`models/YUNET-LICENSE.txt`）。
-- KaTeX（MIT）、Noto CJK UI 字体子集（SIL OFL），许可分别位于对应 `vendor/` 子目录。
-
-## 隐私
-
-图片通过 File API 读取、Canvas 与 Worker 本地处理，不发送到服务器，不写入持久存储。无分析统计。所有资源自托管；网络请求仅获取公共静态资源，Cache API 仅缓存模型。分享是用户主动导出数学系数到 URL fragment，详见上方分享隐私说明。首次离线且无缓存时可选经典算法；预绘样例、字体和公式不需要第三方服务。
-
-## GitHub Pages 部署
-
-把此目录文件推送到 GitHub 仓库的 `main` 分支根目录。在仓库 **Settings → Pages → Build and deployment** 中选择 **Deploy from a branch → main → / (root)** 并保存。无需 npm、构建命令或 Actions 工作流。`.nojekyll` 禁止 Jekyll 处理，所有资源使用相对路径，兼容项目子路径。
-
-## 检查
-
-算法测试：`node --test fourier.test.mjs`。浏览器检查需另行验证图片上传、动画与下载。运行时不需要 Node 或任何包。
-
-## 许可
-
-MIT，见 [LICENSE](LICENSE)。
+- Native HTML/CSS/ES modules, dedicated ML and path workers; no runtime framework.
+- XY applies a real DFT independently to x and y. Pen lifts prevent travel lines across the face. Auto N retains ≥99% energy and targets ≤1.5px mean normalized reconstruction error.
+- The v2 binary payload uses DEFLATE, quantized coefficients and a full pen-lift bitmap. Its option byte stores guessing in bit 0 and legacy palette in bits 1–2. Numeric transport groups five bytes into thirteen decimal digits with an explicit tail length.
+- QR uses separate Byte (URL) and Numeric (payload) segments, a 5760-bit budget and integer modules with a four-module quiet zone, targeting QR ≤ v18. Shared coefficients may omit minor details. Cards retain the creator's actual full-N first terms and counts.
+- Share base: `https://omygpt.github.io/fourier-portrait/`. Local verification must replace only the origin/path while keeping the exact fragment.
+- Tests: `node --test fourier.test.mjs`. Syntax: `node --check app.js` (and other modified modules). Whitespace: `git diff --check`.
+- Model origins, sizes and licenses: [models/README.md](models/README.md). Third-party license files are vendored with their assets.
