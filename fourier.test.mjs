@@ -9,6 +9,17 @@ import {analyzeSketch} from './path.mjs';
 import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
+import {shouldReloadForHash} from './navigation.mjs';
+
+test('hash navigation accepts numeric and legacy shares, resets home and rejects broken payloads',()=>{
+  const path=Array.from({length:64},(_,i)=>({x:20*Math.cos(i*Math.PI/32),y:15*Math.sin(i*Math.PI/32),draw:true}));
+  const share=encodePortrait({mode:'complex',chains:{complex:dft(path)},path,dimensions:{width:40,height:30},name:'导航测试'}),hash=new URL(share.url).hash;
+  assert.equal(shouldReloadForHash(hash),true);
+  const bytes=decimalToBytes(hash.slice(2)),legacy='#p='+Buffer.from(bytes).toString('base64url');
+  assert.equal(shouldReloadForHash(legacy),true);
+  assert.equal(shouldReloadForHash(''),true);assert.equal(shouldReloadForHash('#formula'),false);
+  for(const bad of ['#n','#n123','#p=','#p=broken'])assert.throws(()=>shouldReloadForHash(bad));
+});
 
 test('dense portrait samples preserve Fourier geometry and explicit pen lifts in both modes',()=>{
   const path=Array.from({length:16},(_,i)=>({x:20*Math.cos(i*Math.PI/8),y:15*Math.sin(i*Math.PI/8),draw:i<6||i>9})),chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};

@@ -6,6 +6,7 @@ import {encodePortrait,decodePortrait,cleanName,SHARE_BASE} from './share.mjs';
 import {renderSocialCard} from './card.mjs';
 import {analyzeSketch} from './path.mjs';
 import {PORTRAIT_INK,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
+import {shouldReloadForHash} from './navigation.mjs';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d');
@@ -422,4 +423,8 @@ function loadShared(){
     reset();canvas.closest('.lens').after($('lens-note'));resizeSharedCanvas();$('status').textContent='仅由数学系数重建 · 没有原始照片';
   }catch(error){showError(error.message);loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');}
 }
+window.addEventListener('hashchange',()=>{
+  try{if(shouldReloadForHash(location.hash)){history.scrollRestoration='manual';scrollTo({top:0,left:0,behavior:'instant'});location.reload();}}
+  catch(error){showError(error.message);}
+});
 if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');requestAnimationFrame(frame);
