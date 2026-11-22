@@ -9,7 +9,7 @@ import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
 import {featureRegions} from './portrait-preprocess.mjs';
-import {tintSketch,sketchReveal} from './sketch.mjs';
+import {tintSketch,sketchReveal,sketchBlend,drawSketch} from './sketch.mjs';
 
 const $ = id => document.getElementById(id);
 let palette='ink';
@@ -29,7 +29,17 @@ const samples = [
 ];
 let coefficients = [], active = [], path = [], picture = null, sketch = null;
 let tinted=null,tintedPalette='',resultView='overlay';
+let sketchPending=false,sketchArrived=0,installedGeneration=0,lateSketch=null;
 function sketchSurface(){if(sketch&&(!tinted||tintedPalette!==palette)){tinted=tintSketch(sketch,palette);tintedPalette=palette;}return tinted;}
+function acceptSketch(data,token){
+  if(token!==generation)return;
+  lateSketch=data;if(installedGeneration!==token)return;
+  sketchPending=false;$('download-sketch').disabled=false;
+  if(data.sketch){sketch=graySurface(data.sketch);tinted=null;sketchArrived=performance.now();}
+  $('status').textContent=$('status').textContent.replace(' · 素描正在落纸…','')+(data.sketch?' · U²-Net 人像素描':' · 素描暂不可用，已保留轮廓');
+  $('lens-note').textContent=data.sketch?'光影落纸，每一笔都是圆的回声':'素描暂不可用，圆周轮廓已保留';
+  if($('card-dialog').open)createCard();
+}
 let xCoefficients = [], yCoefficients = [], activeX = [], activeY = [];
 let mode = 'xy', plot = {x:450,y:450,scale:1}, topChain = {x:450,y:150}, leftChain = {x:150,y:450};
 let automatic = null, manual = false;
@@ -123,7 +133,8 @@ function install(result, image, name, demo) {
   xCoefficients=result.x;yCoefficients=result.y;
   scale=590/Math.max(dimensions.width,dimensions.height);
   automatic=result.automatic;automaticBounds=result.bounds;manual=false;
-  reset(!demo);$('source-label').textContent=name;
+  sketchPending=Boolean(result.sketchPending);sketchArrived=0;$('download-sketch').disabled=sketchPending;
+  reset(!demo&&!sketchPending);$('source-label').textContent=name;
   $('status').textContent=demo ? '示例 / 傅里叶 · 由他的圆，画出他本人' : `${strokeCount} 条笔画 · ${path.length} 个等距采样点 · 全程本地`;
 }
 
@@ -132,7 +143,7 @@ async function prepare(image,sampleId,token) {
   const work=document.createElement('canvas'), ratio=Math.min(1,400/Math.max(image.naturalWidth,image.naturalHeight));
   work.width=Math.max(4,Math.round(image.naturalWidth*ratio));work.height=Math.max(4,Math.round(image.naturalHeight*ratio));
   const wc=work.getContext('2d',{willReadFrequently:true});wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.drawImage(image,0,0,work.width,work.height);
-  let binary,renderer='XDoG',fallback=false,face=null,landmarks=[],displaySketch=null,sketchFallback=false;
+  let binary,renderer='XDoG',fallback=false,face=null,landmarks=[],displaySketch=null,sketchFallback=false,sketchPending=false;
   if(style!=='classic')try{
     let gray;
     if(sampleId){
@@ -144,10 +155,10 @@ async function prepare(image,sampleId,token) {
       renderer=style==='anime'?'预绘素描线稿':'预绘清晰轮廓';
     }else{
       if(token===generation)$('use-classic').hidden=false;
-      const result=await modelLineArt(image,style,progress=>{if(token===generation)$('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);});
+      const result=await modelLineArt(image,style,progress=>{if(token!==generation)return;if(progress.sketchProgress){if(installedGeneration===token&&sketchPending)$('lens-note').textContent=progress.message||`素描模型正在落纸… ${progress.progress}%`;}else $('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);},data=>acceptSketch(data,token));
       if(token===generation)$('use-classic').hidden=true;
       gray=result.gray;face=result.face;landmarks=result.landmarks;work.width=result.width;work.height=result.height;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
-      sketchFallback=result.sketchFallback;displaySketch=graySurface(result.sketch||{gray,width:result.width,height:result.height});
+      sketchPending=result.sketchPending;displaySketch=graySurface({gray,width:result.width,height:result.height});
     }
     binary=thresholdSketch(gray,work.width,work.height,Number($('detail').value),Number($('style').value),featureRegions(landmarks,face));
   }catch{fallback=true;renderer='XDoG';}
@@ -157,7 +168,7 @@ async function prepare(image,sampleId,token) {
   const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG',face,landmarks),{strokes}=analysis;
   wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.strokeStyle='#161512';wc.lineWidth=1.15;wc.lineJoin='round';wc.lineCap='round';
   for(const stroke of strokes){wc.beginPath();wc.moveTo(stroke[0].x,stroke[0].y);for(const p of stroke.slice(1))wc.lineTo(p.x,p.y);wc.stroke();}
-  return {...analysis,sketch:displaySketch||work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,sketchFallback,elapsed:Math.round(performance.now()-started)};
+  return {...analysis,sketch:displaySketch||work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,sketchFallback,sketchPending,elapsed:Math.round(performance.now()-started)};
 }
 
 function graySurface({gray,width,height}){
@@ -193,7 +204,7 @@ async function focusStage(token) {
 }
 
 async function loadImage(source,name,demo=false,sampleId='') {
-  const token=++generation;busy=true;$('error').hidden=true;$('status').textContent='正在本地将照片化作线条…';
+  const token=++generation;cancelLineArt(true);lateSketch=null;busy=true;$('error').hidden=true;$('status').textContent='正在本地将照片化作线条…';
   try {
     const image=source instanceof HTMLImageElement?source:new Image();
     if(typeof source==='string'){image.src=source;await image.decode();}
@@ -202,7 +213,11 @@ async function loadImage(source,name,demo=false,sampleId='') {
     currentSampleId=sampleId;
     install(result,image,name,demo);
     $('status').textContent+=` · ${result.renderer} · ${result.elapsed}ms`;
-    if(!result.fallback&&!result.sketchFallback&&(sampleId||$('model-style').value!=='classic'))$('status').textContent+=' · U²-Net 人像素描';
+    installedGeneration=token;
+    if(result.sketchPending)$('status').textContent+=' · 素描正在落纸…';
+    else if(!result.fallback&&!result.sketchFallback&&(sampleId||$('model-style').value!=='classic'))$('status').textContent+=' · U²-Net 人像素描';
+    if(lateSketch)acceptSketch(lateSketch,token);
+    busy=false;
     if(result.fallback)$('status').textContent+=' · 模型暂未就绪，已切换经典算法';
     else if(result.sketchFallback)$('status').textContent+=' · 素描暂不可用，已保留轮廓';
     for(const button of document.querySelectorAll('[data-sample]'))button.setAttribute('aria-pressed',String(button.dataset.sample===sampleId));
@@ -288,6 +303,7 @@ function previewFormula(){
 async function createCard(){
   const token=++cardGeneration;$('card-status').textContent='正在点亮你的分享卡片…';
   for(const id of ['save-card','system-share','copy-link'])$(id).disabled=true;
+  if(sketchPending){$('card-status').textContent='圆周已就绪，素描仍在落纸；完成后会自动生成卡片。';$('card-preview').removeAttribute('src');$('share-url').value='';cardSurface=cardPayload=null;return;}
   try{
     await document.fonts.ready;await Promise.all(['24px KaTeX_Main','italic 24px KaTeX_Math','36px KaTeX_Size2'].map(font=>document.fonts.load(font)));await new Promise(resolve=>requestAnimationFrame(resolve));
     if(token!==cardGeneration)return;
@@ -337,14 +353,15 @@ $('copy-formula').addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(formulaBody(mode,currentChains()));$('formula-status').textContent='公式已复制。';}
   catch{$('formula-status').textContent='无法访问剪贴板，请保存 LaTeX 文件。';}
 });
-$('download-sketch').addEventListener('click',()=>{if(sketch){const surface=sketchSurface(),output=document.createElement('canvas');output.width=surface.width;output.height=surface.height;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,output.width,output.height);out.drawImage(surface,0,0);download(output,'portrait-sketch.png');}});
+$('download-sketch').addEventListener('click',()=>{if(sketch&&!sketchPending){const surface=sketchSurface(),output=document.createElement('canvas');output.width=surface.width;output.height=surface.height;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,output.width,output.height);drawSketch(out,surface,0,0,output.width,output.height,palette);download(output,'portrait-sketch.png');}});
 $('download').addEventListener('click',()=>{
-  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);drawComposition(out,shared?'lines':resultView,1);download(output,'fourier-portrait.png');
+  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);drawComposition(out,shared?'lines':resultView,1,true);download(output,'fourier-portrait.png');
 });
 
-function drawComposition(context,kind,progress){
-  if(sketch&&kind!=='lines'){context.globalAlpha=sketchReveal(progress);const w=dimensions.width*plot.scale,h=dimensions.height*plot.scale;context.drawImage(sketchSurface(),plot.x-w/2,plot.y-h/2,w,h);}
-  if(kind!=='sketch'){context.globalAlpha=sketch&&kind==='overlay'?.28:1;context.drawImage(trail,0,0,900,900);}context.globalAlpha=1;
+function drawComposition(context,kind,progress,complete=false){
+  const visible=sketch&&!sketchPending,arrival=sketchArrived&&!reduced.matches&&!complete?Math.min(1,(performance.now()-sketchArrived)/1200):1;
+  if(visible&&kind!=='lines'){context.globalAlpha=sketchReveal(progress)*arrival;const w=dimensions.width*plot.scale,h=dimensions.height*plot.scale;drawSketch(context,sketchSurface(),plot.x-w/2,plot.y-h/2,w,h,palette);}
+  if(kind!=='sketch'||!visible){context.globalAlpha=visible&&kind==='overlay'?1-.82*arrival:1;context.drawImage(trail,0,0,900,900);}context.globalAlpha=1;
 }
 
 function drawSharedPortrait(){
@@ -405,7 +422,7 @@ function render() {
     if(cropping){ctx.strokeStyle=colors().accent;ctx.lineWidth=2;ctx.setLineDash([8,5]);const frame=photoFrame(),a=cropStart||{x:450-frame.width/2,y:450-frame.height/2},b=cropEnd||{x:450+frame.width/2,y:450+frame.height/2};ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([]);}
     return;
   }
-  if(view==='sketch'&&sketch){drawSurface(sketchSurface());if(stage==='sketch'&&stageTime<1.6&&!reduced.matches)drawSurface(picture,Math.max(0,1-stageTime/1.6));return;}
+  if(view==='sketch'&&sketch){ctx.save();ctx.globalCompositeOperation=sketchBlend(palette);drawSurface(sketchSurface());ctx.restore();if(stage==='sketch'&&stageTime<1.6&&!reduced.matches)drawSurface(picture,Math.max(0,1-stageTime/1.6));return;}
   if(stage==='reveal'){
     ctx.fillStyle=colors().line;const count=Math.floor(path.length*Math.min(1,stageTime/1.3));
     for(let i=0;i<count;i+=2){const p=path[i];if(!p.draw)continue;ctx.globalAlpha=.55;ctx.beginPath();ctx.arc(plot.x+p.x*plot.scale,plot.y+p.y*plot.scale,1.25,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;return;

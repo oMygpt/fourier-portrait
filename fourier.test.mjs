@@ -15,7 +15,43 @@ import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.m
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
-import {u2Input,u2Gray,sketchReveal} from './sketch.mjs';
+import {u2Input,u2Gray,sketchReveal,paperSketch,sketchBlend,subjectMatte} from './sketch.mjs';
+import {modelLineArt,cancelLineArt} from './ml-client.mjs';
+
+test('sketch matte keeps the connected portrait and its soft hair margin, not detached background blobs',()=>{
+  const w=21,h=21,matte=new Uint8Array(w*h);for(let y=5;y<17;y++)for(let x=5;x<17;x++)matte[y*w+x]=255;
+  matte[0]=matte[1]=255;matte[10*w+4]=100;const clean=subjectMatte(matte,w,h);
+  assert.equal(clean[0],0);assert.equal(clean[1],0);assert.equal(clean[10*w+10],255);assert.ok(clean[10*w+4]>0);assert.equal(matte[0],255);
+  assert.ok(subjectMatte(new Uint8Array(w*h),w,h).every(v=>v===0));assert.throws(()=>subjectMatte([],0,0),RangeError);
+});
+
+test('paper masking removes background and frame edges without pruning interior hair or shoulders',()=>{
+  const w=101,h=101,gray=new Uint8Array(w*h),matte=new Uint8Array(w*h).fill(255),masked=paperSketch(gray,w,h,matte);
+  for(let x=0;x<w;x++){assert.equal(masked[x],255);assert.equal(masked[(h-1)*w+x],255);}
+  for(let y=0;y<h;y++){assert.equal(masked[y*w],255);assert.equal(masked[y*w+w-1],255);}
+  assert.equal(masked[20*w+30],0);assert.equal(masked[80*w+30],0);assert.equal(masked[50*w+50],0);
+  assert.ok(paperSketch(gray,w,h,new Uint8Array(w*h)).every(v=>v===255));
+  assert.equal(paperSketch(new Uint8Array(w*h).fill(255),w,h)[50*w+50],255);
+  assert.ok(paperSketch(gray,w,h,new Uint8Array(w*h).fill(128))[50*w+50]>0);
+  assert.throws(()=>paperSketch([],0,0),RangeError);assert.throws(()=>paperSketch(gray,w,h,new Uint8Array(2)),RangeError);
+  assert.equal(sketchBlend('ink'),'multiply');assert.equal(sketchBlend('navy'),'screen');assert.equal(sketchBlend('silver'),'screen');
+});
+
+test('ML client resolves contour before a late sketch and ignores stale or failed sketch jobs',async()=>{
+  const originalWorker=globalThis.Worker,originalBitmap=globalThis.createImageBitmap,instances=[],updates=[],progress=[];
+  globalThis.createImageBitmap=async()=>({});
+  globalThis.Worker=class{constructor(){instances.push(this);}postMessage(data){this.id=data.id;}terminate(){this.terminated=true;}emit(data){this.onmessage({data:{id:this.id,...data}});}};
+  try{
+    const first=modelLineArt({},'contour',d=>progress.push(d),d=>updates.push(d));await Promise.resolve();const worker=instances[0];
+    worker.emit({gray:Uint8Array.of(1),sketchPending:true});assert.equal((await first).gray[0],1);assert.equal(updates.length,0);
+    worker.emit({progress:50});assert.equal(progress[0].sketchProgress,true);
+    worker.emit({sketch:{gray:Uint8Array.of(2)}});assert.equal(updates[0].sketch.gray[0],2);cancelLineArt(true);assert.ok(!worker.terminated);
+    const second=modelLineArt({},'contour',()=>{},d=>updates.push(d));await Promise.resolve();assert.equal(instances.length,1);worker.emit({gray:Uint8Array.of(3),sketchPending:true});await second;
+    const oldId=worker.id;cancelLineArt(true);assert.equal(updates[1].sketchFallback,true);assert.ok(worker.terminated);worker.onmessage({data:{id:oldId,sketch:{gray:Uint8Array.of(9)}}});assert.equal(updates.length,2);
+    const third=modelLineArt({},'contour',()=>{},d=>updates.push(d));await Promise.resolve();const next=instances[1];next.emit({gray:Uint8Array.of(4),sketchPending:true});await third;next.emit({sketchFallback:true});assert.equal(updates[2].sketchFallback,true);
+    const failed=modelLineArt({},'contour',()=>{});await Promise.resolve();next.emit({error:'broken contour'});await assert.rejects(failed,/broken contour/);
+  }finally{cancelLineArt();globalThis.Worker=originalWorker;globalThis.createImageBitmap=originalBitmap;}
+});
 
 test('U2 sketch preprocessing and output normalization are independent of Fourier data',()=>{
   const input=u2Input(Uint8Array.of(255,128,0,255,0,0,255,255));

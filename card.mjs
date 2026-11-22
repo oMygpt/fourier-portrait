@@ -1,4 +1,5 @@
 import {evaluate} from './fourier.mjs';
+import {drawSketch} from './sketch.mjs';
 import {shareQrSegments} from './share.mjs';
 import {PORTRAIT_INK} from './portrait-render.mjs';
 import {getPalette} from './palettes.mjs';
@@ -92,7 +93,7 @@ export function renderSocialCard({mode,chains,path,sketch=null,name,guess=false,
     points.push({...p,draw:path[Math.min(path.length-1,Math.floor(t*path.length))]?.draw});minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
   }
   const scale=Math.min(box.w/Math.max(1,maxX-minX),box.h/Math.max(1,maxY-minY))*.96,cx=540-(minX+maxX)*scale/2,centerY=cy-(minY+maxY)*scale/2;
-  if(sketch){const factor=Math.min(box.w/sketch.width,box.h/sketch.height)*.96,w=sketch.width*factor,h=sketch.height*factor;ctx.drawImage(sketch,540-w/2,cy-h/2,w,h);}
+  if(sketch){const factor=Math.min(box.w/sketch.width,box.h/sketch.height)*.96,w=sketch.width*factor,h=sketch.height*factor;drawSketch(ctx,sketch,540-w/2,cy-h/2,w,h,palette);}
   else{
   ctx.save();ctx.beginPath();points.forEach((p,i)=>{const x=cx+p.x*scale,y=centerY+p.y*scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=PORTRAIT_INK.width;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=colors.glow;ctx.shadowColor=colors.shadow;ctx.stroke();ctx.restore();

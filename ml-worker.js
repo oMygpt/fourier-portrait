@@ -43,10 +43,14 @@ async function run({data:{id,bitmap,style}}){
     tensor.dispose();for(const value of Object.values(output))value.dispose();ctx.putImageData(pixels,0,0);
     const cropped=new OffscreenCanvas(width,height),cc=cropped.getContext('2d',{willReadFrequently:true});cc.drawImage(canvas,x,y,w,h,0,0,width,height);
     const image=cc.getImageData(0,0,width,height).data,gray=new Uint8Array(width*height);for(let i=0;i<gray.length;i++)gray[i]=image[i*4];
-    let sketch=null,sketchFallback=false;
-    try{const {portraitSketch}=await import('./sketch-worker.mjs');sketch=await portraitSketch(source,ort,file=>modelBytes(file,id),message=>postMessage({id,message}));}
-    catch{sketchFallback=true;postMessage({id,message:'素描模型暂不可用，保留清晰轮廓'});}
-    bitmap.close();postMessage({id,gray,width,height,sketch,sketchFallback,face:portrait.face,landmarks:portrait.landmarks||[],enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed,strategy:portrait.strategy||'original'},sketch?[gray.buffer,sketch.gray.buffer]:[gray.buffer]);
+    postMessage({id,gray,width,height,sketchPending:true,face:portrait.face,landmarks:portrait.landmarks||[],enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed,strategy:portrait.strategy||'original'},[gray.buffer]);
+    try{
+      const {portraitSketch}=await import('./sketch-worker.mjs');let matte=portrait.sketchMatte;
+      if(!matte)try{const {portraitMatte}=await import('./portrait-worker.mjs');matte=await portraitMatte(source,ort,file=>modelBytes(file,id));}catch{}
+      const sketch=await portraitSketch(source,ort,file=>modelBytes(file,id),message=>postMessage({id,message,sketchProgress:true}),matte);
+      postMessage({id,sketch},[sketch.gray.buffer]);
+    }catch{postMessage({id,sketchFallback:true});}
+    bitmap.close();
   }catch(error){bitmap?.close();postMessage({id,error:error.message||'Model inference failed'});}
 }
 let queue=Promise.resolve();
