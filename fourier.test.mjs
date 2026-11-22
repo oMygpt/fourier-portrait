@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
 import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
 import {selectTerms,formulaBody,latexDocument,limitChains} from './portrait.mjs';
@@ -11,7 +12,8 @@ import {PALETTES,PALETTE_IDS,normalizePalette} from './palettes.mjs';
 import {backgroundComplexity,portraitCrop,detectFace,shouldEnhancePortrait,featureRegions,touchesFeature} from './portrait-preprocess.mjs';
 import {consolidatePortrait} from './strokes.mjs';
 import {analyzeSketch} from './path.mjs';
-import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
+import {numericExcerpt,cardCopy,renderSocialCard,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
+import {chooseLanguage,progressDetails} from './i18n.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
@@ -64,7 +66,7 @@ test('U2 sketch preprocessing and output normalization are independent of Fourie
 test('sketch opacity reveals smoothly without changing Fourier samples or payload',()=>{
   assert.equal(sketchReveal(-1),0);assert.equal(sketchReveal(0),0);assert.equal(sketchReveal(1),1);assert.equal(sketchReveal(2),1);assert.ok(sketchReveal(.3)<sketchReveal(.7));
   const path=Array.from({length:64},(_,i)=>({x:20*Math.cos(i*Math.PI/32),y:15*Math.sin(i*Math.PI/32),draw:true})),chains={complex:dft(path)},data={mode:'complex',path,chains,dimensions:{width:40,height:30}};
-  assert.deepEqual(encodePortrait(data),encodePortrait({...data,sketch:new Uint8Array([0,255]),resultView:'overlay'}));
+  assert.deepEqual(encodePortrait(data),encodePortrait({...data,sketch:new Uint8Array([0,255])}));
 });
 
 test('all six samples include full-resolution pre-baked U2 sketches',()=>{
@@ -121,11 +123,62 @@ test('palette QR uses flat integer modules and an untextured four-module quiet z
   for(const modules of [0,22,93])assert.throws(()=>drawCardQr(ctx,{getModuleCount:()=>modules},620,996),RangeError);
 });
 
-test('personal card stats use the current mode, actual circle count and non-DC dominant frequency',()=>{
-  const chains={x:[{k:0,amplitude:100},{k:-3,amplitude:8}],y:[{k:2,amplitude:5}],complex:[{k:7,amplitude:12}]};
-  assert.deepEqual(cardStats('xy',chains),{count:3,k:-3,radius:100});assert.deepEqual(cardStats('complex',chains),{count:1,k:7,radius:12});
-  assert.deepEqual(cardStats('xy',{x:[],y:[]}),{count:0,k:0,radius:0});
-  for(const amplitude of [NaN,Infinity,-1])assert.throws(()=>cardStats('complex',{complex:[{k:1,amplitude}]}),RangeError);
+test('formula cards use real terms, localized copy and no private portrait',()=>{
+  const chains={x:[{k:1,amplitude:2,phase:0}],y:[{k:3,amplitude:5,phase:.5}]};
+  const en=cardCopy({mode:'xy',chains,name:'Ada'}),zh=cardCopy({mode:'xy',chains,name:'Ada',lang:'zh'});
+  assert.equal(en.title,'My Fourier Formula');assert.equal(zh.title,'我的傅里叶公式');assert.equal(en.nickname,'Ada');
+  assert.match(en.equations[0].text,/2 cos/);assert.match(en.equations[1].text,/5 cos\(6πt/);
+  assert.equal(en.equations[0].terms,'… 1 term');assert.equal(zh.equations[0].terms,'… 共 1 项');
+  assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).nickname,'');
+  assert.equal(cardCopy({mode:'xy',chains:{x:[],y:[]}}).equations[0].text,'0');
+  assert.throws(()=>cardCopy({mode:'xy',chains:{x:[{k:0,amplitude:NaN,phase:0}],y:[]}}),RangeError);
+  assert.ok(!renderSocialCard.toString().includes('sketch'));
+});
+
+test('polished cards wrap at term boundaries and keep one bilingual scan CTA',()=>{
+  const values=[{k:1,amplitude:12,phase:.5},{k:3,amplitude:6,phase:-.7},{k:4,amplitude:3,phase:1}];
+  for(const lang of ['zh','en']){
+    const copy=cardCopy({mode:'xy',chains:{x:values,y:[]},lang});
+    assert.deepEqual(copy.equations[0].lines,['= 12 cos(2πt + 0.5)','+ 6 cos(6πt − 0.7) + ⋯']);
+    assert.deepEqual(copy.equations[1].lines,['= 0']);
+    assert.equal((copy.cta.join(' ').match(lang==='zh'?/扫码/g:/Scan/g)||[]).length,1);
+    assert.ok(copy.example.includes(lang==='zh'?'傅里叶':'Fourier'));assert.ok(copy.mystery.endsWith('?'));
+    assert.equal(copy.caption,undefined);
+  }
+  const complex=cardCopy({mode:'complex',chains:{complex:values}});
+  assert.equal(complex.equations[0].axis,'z');assert.equal(complex.equations[0].lines.length,2);
+});
+
+test('language defaults and download details are local, bilingual and empty-safe',()=>{
+  assert.equal(chooseLanguage(null,'zh-Hant'),'zh');assert.equal(chooseLanguage(null,'en-US'),'en');assert.equal(chooseLanguage(null),'en');
+  assert.equal(chooseLanguage('en','zh-CN'),'en');assert.equal(chooseLanguage('zh','en-US'),'zh');assert.equal(chooseLanguage('invalid','zh'),'zh');
+  assert.equal(progressDetails({received:1e6,total:4e6},'en',2000).bytes,'1.0 / 4.0 MB');
+  assert.equal(progressDetails({received:1e6,total:4e6},'en',2000).eta,'~6s download left');
+  assert.match(progressDetails({cached:true},'zh').bytes,/已缓存/);
+  assert.match(progressDetails({},'en').bytes,/Computing/);
+  assert.equal(progressDetails({received:1e6,total:0},'en').bytes,'1.0 MB');
+  assert.match(progressDetails({received:0,total:10},'zh').eta,/预计/);
+});
+
+test('creator has one XY workflow, one final overlay and only in-panel circle controls',()=>{
+  const html=readFileSync(new URL('./index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./app.js',import.meta.url),'utf8');
+  for(const removed of ['data-mode=','model-style','data-result-view','card-palette','id="advanced"'])assert.ok(!html.includes(removed));
+  assert.ok(html.indexOf('id="terms"')>html.indexOf('id="personal-formula"'));
+  assert.ok(html.includes('data-zh="生成我的公式 ↗">Make mine ↗'));
+  assert.ok(!app.includes('resultView'));assert.ok(app.includes("composition(out,1,true)"));
+});
+
+test('worker download progress reports actual streamed and cached bytes and rejects failures',async()=>{
+  const events=[],bytes=Uint8Array.of(1,2,3,4);
+  let cached=false,fail=false;
+  const env={URL,Response,Uint8Array,importScripts(){},ort:{env:{wasm:{}}},self:{location:{href:'https://example.test/'}},postMessage(data){events.push(data);},
+    caches:{async open(){return{async match(){return cached?new Response(bytes):null;},async put(){}};}},
+    async fetch(){return new Response(fail?null:bytes,{status:fail?503:200,headers:{'content-length':'4'}});}
+  };
+  const source=readFileSync(new URL('./ml-worker.js',import.meta.url),'utf8');
+  await runInNewContext(source+"\nmodelBytes('contour512.onnx',7)",env);assert.equal(events.at(-1).received,4);assert.equal(events.at(-1).total,4);assert.equal(events.at(-1).file,'contour512.onnx');
+  cached=true;events.length=0;await runInNewContext(source+"\nmodelBytes('contour512.onnx',8)",{...env});assert.equal(events[0].cached,true);assert.equal(events[0].received,4);
+  cached=false;fail=true;await assert.rejects(runInNewContext(source+"\nmodelBytes('contour512.onnx',9)",{...env}),/download failed/);
 });
 
 test('visitor circle budget selects amplitude-ranked terms without mutating the shared portrait',()=>{
@@ -176,13 +229,13 @@ test('bust framing preserves the entire hair width and source top, with head and
   assert.equal(shouldEnhancePortrait({}, {apply:false}),false);assert.equal(shouldEnhancePortrait(null,{apply:true}),false);assert.equal(shouldEnhancePortrait({}, {apply:true}),true);
 });
 
-test('clean sample fallback keeps all twelve main line-art assets and disables enhanced pruning',()=>{
+test('clean sample fallback keeps all six main contour assets and disables enhanced pruning',()=>{
   const metadata=JSON.parse(readFileSync(new URL('./samples/portraits.json',import.meta.url),'utf8')),hash=createHash('sha256');
   for(const id of ['fourier','einstein','newton','curie','euler','gauss']){
     assert.equal(metadata[id].strategy,'original');assert.equal(metadata[id].face,null);assert.deepEqual(metadata[id].landmarks,[]);
-    for(const style of ['contour','anime'])hash.update(readFileSync(new URL(`./samples/${id}-${style}.png`,import.meta.url)));
+    hash.update(readFileSync(new URL(`./samples/${id}-contour.png`,import.meta.url)));
   }
-  assert.equal(hash.digest('hex'),'34837fd51461024ffcf3becef13336218762b2b8bd42d236d56e23221f4b8697');
+  assert.equal(hash.digest('hex'),'7df6ccfb53887aa8c2f1649b0c02e5cbf599075fa2d77e8782237fed5c9924eb');
 });
 
 test('landmark-region strokes survive aggressive pruning and cannot merge across features',()=>{
@@ -321,6 +374,9 @@ test('personal LaTeX includes current terms, valid delimiters and clean signs',(
     let depth=0;for(const c of document){if(c==='{')depth++;if(c==='}')depth--;assert.ok(depth>=0);}assert.equal(depth,0);
     assert.ok(document.includes('\\documentclass{article}'));assert.ok(document.includes('\\end{document}'));
     assert.ok(formulaBody(mode,chains,1).includes('共 2 项'));
+    assert.ok(formulaBody(mode,chains,1,'en').includes('2 terms'));
+    assert.ok(!/[\u3400-\u9fff]/u.test(latexDocument(mode,chains,'en')));
+    assert.ok(latexDocument(mode,chains,'en').startsWith('% Compile with'));
     assert.ok(latexDocument(mode,{x:[],y:[],complex:[]}).includes('=0'));
   }
 });

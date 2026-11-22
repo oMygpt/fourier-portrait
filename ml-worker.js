@@ -2,36 +2,34 @@ importScripts('vendor/ort/ort.min.js');
 ort.env.wasm.wasmPaths=new URL('vendor/ort/',self.location.href).href;
 ort.env.wasm.numThreads=1;
 ort.env.logLevel='error';
-let session=null,currentStyle='';
+let session=null;
 
 async function modelBytes(file,id){
   const url=new URL(`models/${file}`,self.location.href).href;
-  const model=file==='yunet.onnx'?'人像识别模型':file==='modnet-q8.onnx'?'背景分离模型':file==='u2net-portrait-q8.onnx'?'人像素描模型':'描线模型',notify=data=>postMessage({id,model,...data});
+  const notify=data=>postMessage({id,file,...data});
   let cache;
-  try{cache=await caches.open('fourier-lineart-v1');const saved=await cache.match(url);if(saved){notify({progress:100,cached:true});return saved.arrayBuffer();}}catch{}
+  try{cache=await caches.open('fourier-lineart-v1');const saved=await cache.match(url);if(saved){const bytes=await saved.arrayBuffer();notify({progress:100,cached:true,received:bytes.byteLength,total:bytes.byteLength});return bytes;}}catch{}
   const response=await fetch(url);if(!response.ok)throw Error('Model download failed');
-  const total=Number(response.headers.get('content-length'))||(file==='u2net-portrait-q8.onnx'?44233106:17500000),reader=response.body.getReader(),chunks=[];let received=0;
-  while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:Math.min(99,Math.round(received/total*100))});}
+  const total=Number(response.headers.get('content-length'))||0,reader=response.body.getReader(),chunks=[];let received=0;
+  while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:total?Math.min(99,Math.round(received/total*100)):0,received,total});}
   const bytes=new Uint8Array(received);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   try{await cache?.put(url,new Response(bytes,{headers:{'content-type':'application/octet-stream'}}));}catch{}
-  notify({progress:100});return bytes;
+  notify({progress:100,received,total:received});return bytes;
 }
 
-async function run({data:{id,bitmap,style}}){
+async function run({data:{id,bitmap}}){
   try{
     let portrait={image:bitmap,face:null,enhanced:false,mattingUsed:false};
-    try{const {preparePortrait}=await import('./portrait-worker.mjs');portrait=await preparePortrait(bitmap,ort,file=>modelBytes(file,id),message=>postMessage({id,message}));}
+    try{const {preparePortrait}=await import('./portrait-worker.mjs');portrait=await preparePortrait(bitmap,ort,file=>modelBytes(file,id),(message,phase,matte)=>postMessage({id,message,phase,matte}));}
     catch(error){postMessage({id,message:'人像预处理暂不可用，使用原始描线',preprocessFallback:true,reason:error.message});}
     const source=portrait.image;
-    if(!session||currentStyle!==style){
-      if(session){await session.release();session=null;}
-      const bytes=await modelBytes(style==='anime'?'anime512.onnx':'contour512.onnx',id);
+    if(!session){
+      const bytes=await modelBytes('contour512.onnx',id);
       let gpu=false;try{gpu=Boolean(navigator.gpu&&await navigator.gpu.requestAdapter());}catch{}
       if(gpu){try{session=await ort.InferenceSession.create(bytes,{executionProviders:['webgpu','wasm']});}catch{}}
       if(!session)session=await ort.InferenceSession.create(bytes,{executionProviders:['wasm']});
-      currentStyle=style;
     }
-    postMessage({id,progress:100,inference:true,message:'模型正在静静描线…'});
+    postMessage({id,inference:true,phase:'formula'});
     const side=512,canvas=new OffscreenCanvas(side,side),ctx=canvas.getContext('2d',{willReadFrequently:true});
     const ratio=side/Math.max(source.width,source.height),w=Math.round(source.width*ratio),h=Math.round(source.height*ratio),x=Math.floor((side-w)/2),y=Math.floor((side-h)/2);
     ctx.fillStyle='#fff';ctx.fillRect(0,0,side,side);ctx.drawImage(source,x,y,w,h);
@@ -47,7 +45,7 @@ async function run({data:{id,bitmap,style}}){
     try{
       const {portraitSketch}=await import('./sketch-worker.mjs');let matte=portrait.sketchMatte;
       if(!matte)try{const {portraitMatte}=await import('./portrait-worker.mjs');matte=await portraitMatte(source,ort,file=>modelBytes(file,id));}catch{}
-      const sketch=await portraitSketch(source,ort,file=>modelBytes(file,id),message=>postMessage({id,message,sketchProgress:true}),matte);
+      const sketch=await portraitSketch(source,ort,file=>modelBytes(file,id),message=>postMessage({id,message,phase:'sketching',sketchProgress:true}),matte);
       postMessage({id,sketch},[sketch.gray.buffer]);
     }catch{postMessage({id,sketchFallback:true});}
     bitmap.close();

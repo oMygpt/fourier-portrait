@@ -1,17 +1,23 @@
-# Local line-art models
+# Local models / 本地模型
 
-## Portrait sketch (display only)
+All models and ONNX Runtime are served from the same GitHub Pages origin and cached with Cache API. No inference server or runtime HuggingFace requests. 模型全部自托管，不向外部推理服务发送照片。
 
-`u2net-portrait-q8.onnx`: U²-Net portrait drawing, upstream Apache-2.0 (`U2NET-LICENSE.txt`). Source and checkpoint: https://github.com/xuebinqin/U-2-Net (portrait generation demo, `u2net_portrait.pth`). Exported locally to ONNX with per-output-channel INT8 weight storage and DequantizeLinear; computation remains floating point. File: **44,233,106 bytes**, below both 50MB and GitHub Pages' 100MB file limit. This is weight compression, not a claim of 4× speed or memory improvement.
+## U²-Net portrait / 人像素描
 
-Input is RGB stretched to 512×512, normalized by the image maximum and ImageNet mean/std. MODNet removes the background for this layer even when contour preprocessing keeps the original photo. The first output is inverted/min-max normalized, restored to the source aspect ratio, masked again and gently feathered at the frame edges. `sketch-worker.mjs` runs it with the bundled ORT WASM provider in the existing ML Worker, after sending the contour result immediately; model bytes use the same-origin Cache API. The sketch is display/card-only: contour thresholding, stroke analysis, Fourier coefficients and share payload remain independent. A sketch failure retains contour output; a contour failure falls back to XDoG. Samples have six pre-baked `*-u2.png` sketches, computed with matting and feathering from their original sample frames, matching the existing pre-baked contour framing.
+`u2net-portrait-q8.onnx`: **44,233,106 bytes**, Apache-2.0 ([license](U2NET-LICENSE.txt)), from https://github.com/xuebinqin/U-2-Net (`u2net_portrait.pth`). Exported to ONNX with per-channel INT8 weight storage and DequantizeLinear; computation remains floating point. This is not a claim of 4× speed or memory reduction. Below the 50MB budget and GitHub Pages' 100MB file limit.
 
-`contour512.onnx` and `anime512.onnx`: informative-drawings (Chan et al., CVPR 2021), MIT; ONNX export by x-Liola-x, MIT.
+RGB input at 512×512, normalized by the image maximum and ImageNet mean/std. MODNet masks the sketch even when contours retain the clean-photo pipeline. Output is inverted/min-max normalized, restored to source aspect ratio, masked and softly feathered.
 
-- Original: https://github.com/carolineec/informative-drawings
-- Export: https://huggingface.co/x-Liola-x/informative-drawings-onnx
-- Input: float32 RGB `[1, 3, 512, 512]`, range 0–1; output: float32 gray `[1, 1, 512, 512]`, white = 1.
-- Each file is about 17MB. Kept at fp32 to preserve tested WASM behavior and output; no unverified fp16/int8 conversion.
-- White square padding, aspect-preserving resize, and crop-back are implemented in `ml-worker.js`. Six samples have offline-precomputed grayscale output for both styles.
+The worker delivers contours first, then computes the sketch with ORT WASM. It is display-only, never included in cards or share payloads. Cards use only a small pre-baked Joseph Fourier example. Six samples have pre-baked `*-u2.png` assets.
 
-Models and ONNX Runtime are served from the same GitHub Pages origin. No runtime requests to HuggingFace or any inference server.
+## Contour / 轮廓
+
+`contour512.onnx`, about 17MB fp32: informative-drawings (Chan et al., CVPR 2021), MIT. Original: https://github.com/carolineec/informative-drawings ; ONNX export: https://huggingface.co/x-Liola-x/informative-drawings-onnx (MIT).
+
+Float32 RGB [1,3,512,512], 0–1 → float32 gray [1,1,512,512], white = 1. Aspect-preserving white padding and crop-back. Six precomputed contour samples. Anime model and its unused sample assets have been removed.
+
+## Framing / 取景
+
+- `modnet-q8.onnx`: MODNet, Apache-2.0 ([license](MODNET-LICENSE.txt)), https://github.com/ZHKKKe/MODNet .
+- `yunet.onnx`: YuNet, MIT ([license](YUNET-LICENSE.txt)), https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet .
+- Complex-background framing preserves head and shoulders. Clean-photo contours keep the original pipeline; sketch masking is independent.
