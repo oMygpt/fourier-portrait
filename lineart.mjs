@@ -17,7 +17,7 @@ export function styleParameters(style = 50, detail = 50) {
   return {sigma: .9 + s * 1.2, k: 1.45 + s * .3, p: 45 + s * 20, epsilon: -.02 + detail * .0008 + s * .02, phi: 8 + s * 12};
 }
 
-export function thresholdSketch(gray,width,height,detail=50,style=50){
+export function thresholdSketch(gray,width,height,detail=50,style=50,protectedRegions=[]){
   if(gray.length!==width*height||width<1||height<1)throw new RangeError('Invalid sketch dimensions');
   const histogram=new Uint32Array(256);let total=0;
   for(const v of gray){histogram[v]++;total+=v;}
@@ -41,7 +41,8 @@ export function thresholdSketch(gray,width,height,detail=50,style=50){
         visited[next]=1;component.push(next);
       }
     }
-    if(component.length<minimum)for(const p of component)binary[p]=255;
+    const protectedComponent=component.length<minimum&&component.some(p=>protectedRegions.some(r=>p%width>=r.x&&p%width<=r.x+r.width&&Math.floor(p/width)>=r.y&&Math.floor(p/width)<=r.y+r.height));
+    if(component.length<minimum&&!protectedComponent)for(const p of component)binary[p]=255;
   }
   return binary;
 }

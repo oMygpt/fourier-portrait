@@ -43,7 +43,7 @@ async function run({data:{id,bitmap,style}}){
     tensor.dispose();for(const value of Object.values(output))value.dispose();ctx.putImageData(pixels,0,0);
     const cropped=new OffscreenCanvas(width,height),cc=cropped.getContext('2d',{willReadFrequently:true});cc.drawImage(canvas,x,y,w,h,0,0,width,height);
     const image=cc.getImageData(0,0,width,height).data,gray=new Uint8Array(width*height);for(let i=0;i<gray.length;i++)gray[i]=image[i*4];
-    postMessage({id,gray,width,height,face:portrait.face,enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed},[gray.buffer]);
+    postMessage({id,gray,width,height,face:portrait.face,landmarks:portrait.landmarks||[],enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed,strategy:portrait.strategy||'original'},[gray.buffer]);
   }catch(error){bitmap?.close();postMessage({id,error:error.message||'Model inference failed'});}
 }
 let queue=Promise.resolve();

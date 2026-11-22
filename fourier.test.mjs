@@ -1,12 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
 import {selectTerms,formulaBody,latexDocument,limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,bytesToDecimal,decimalToBytes,shareQrSegments,shareQrBits,SHARE_BASE} from './share.mjs';
 import {PALETTES,PALETTE_IDS,normalizePalette} from './palettes.mjs';
-import {backgroundComplexity,portraitCrop,detectFace} from './portrait-preprocess.mjs';
+import {backgroundComplexity,portraitCrop,detectFace,shouldEnhancePortrait,featureRegions,touchesFeature} from './portrait-preprocess.mjs';
 import {consolidatePortrait} from './strokes.mjs';
 import {analyzeSketch} from './path.mjs';
 import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
@@ -106,12 +108,38 @@ test('portrait background check rejects blank backgrounds and identifies clutter
   for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let c=0;c<3;c++)rgba[(y*width+x)*4+c]=Math.floor(x/3)%2?255:0;
   assert.equal(backgroundComplexity(rgba,alpha,width,height).apply,true);alpha.fill(1);assert.equal(backgroundComplexity(rgba,alpha,width,height).apply,false);
   assert.equal(backgroundComplexity([],[],0,0).apply,false);assert.throws(()=>backgroundComplexity([],alpha,width,height),RangeError);
-  assert.deepEqual(portraitCrop(null,80,100),{x:0,y:0,width:80,height:100});const crop=portraitCrop({x:20,y:20,w:20,h:30},80,100);assert.ok(crop.x<=3&&crop.y===0&&crop.width>=54&&crop.height===97);assert.throws(()=>portraitCrop(null,0,100),RangeError);
+  assert.deepEqual(portraitCrop(null,80,100),{x:0,y:0,width:80,height:100});const crop=portraitCrop({x:20,y:20,w:20,h:30},80,100);assert.ok(crop.x<=0&&crop.y===0&&crop.width>=80&&crop.height>=90);assert.throws(()=>portraitCrop(null,0,100),RangeError);
+});
+
+test('bust framing preserves the entire hair width and source top, with head and shoulder margins',()=>{
+  for(const [width,height,face] of [[1024,1280,{x:375,y:88,w:248,h:351}],[960,1280,{x:315,y:254,w:425,h:620}]]){
+    const crop=portraitCrop(face,width,height);assert.ok(crop.x<=0&&crop.x+crop.width>=width&&crop.y===0);assert.ok(face.h/crop.height>=.3&&face.h/crop.height<=.4);assert.ok(crop.height>=face.y+face.h*2.35);
+  }
+  assert.equal(shouldEnhancePortrait({}, {apply:false}),false);assert.equal(shouldEnhancePortrait(null,{apply:true}),false);assert.equal(shouldEnhancePortrait({}, {apply:true}),true);
+});
+
+test('clean sample fallback keeps all twelve main line-art assets and disables enhanced pruning',()=>{
+  const metadata=JSON.parse(readFileSync(new URL('./samples/portraits.json',import.meta.url),'utf8')),hash=createHash('sha256');
+  for(const id of ['fourier','einstein','newton','curie','euler','gauss']){
+    assert.equal(metadata[id].strategy,'original');assert.equal(metadata[id].face,null);assert.deepEqual(metadata[id].landmarks,[]);
+    for(const style of ['contour','anime'])hash.update(readFileSync(new URL(`./samples/${id}-${style}.png`,import.meta.url)));
+  }
+  assert.equal(hash.digest('hex'),'34837fd51461024ffcf3becef13336218762b2b8bd42d236d56e23221f4b8697');
+});
+
+test('landmark-region strokes survive aggressive pruning and cannot merge across features',()=>{
+  const width=120,height=160,face=[30,30,60,85],landmarks=[{x:45,y:60},{x:75,y:60},{x:60,y:86},{x:49,y:104},{x:71,y:104}],binary=new Uint8Array(width*height).fill(255),regions=featureRegions(landmarks,face);
+  for(const [y,a,b] of [[60,45,47],[60,49,51],[86,59,61],[104,56,64]])for(let x=a;x<=b;x++)binary[y*width+x]=0;
+  const strokes=consolidatePortrait(binary,width,height,50,face,landmarks);assert.equal(strokes.length,4);assert.ok(strokes.every(s=>touchesFeature(s,regions)));assert.equal(strokes.filter(s=>s.every(p=>p.y===60)).length,2);assert.deepEqual(featureRegions([],face),[]);assert.equal(touchesFeature([],regions),false);
+  const ordinary=thresholdSketch(binary,width,height,50,50),protectedBinary=thresholdSketch(binary,width,height,50,50,regions);assert.equal(ordinary[60*width+45],255);assert.equal(protectedBinary[60*width+45],0);assert.equal(protectedBinary[86*width+60],0);assert.equal(consolidatePortrait(protectedBinary,width,height,50,face,landmarks).length,4);
+  const dense=new Uint8Array(width*height).fill(255);let count=0;
+  for(let y=48;y<=112;y+=4)for(let x=32;x<=88;x+=4)if(touchesFeature([{x,y},{x:x+1,y}],regions)){dense[y*width+x]=dense[y*width+x+1]=0;count++;}
+  assert.ok(count>120);assert.equal(consolidatePortrait(thresholdSketch(dense,width,height,50,50,regions),width,height,50,face,landmarks).length,count);
 });
 
 test('YuNet decoding handles detections, no face, overlap suppression and malformed outputs',()=>{
   const outputs={};for(const stride of [8,16,32]){const count=(640/stride)**2;outputs[`cls_${stride}`]={data:new Float32Array(count)};outputs[`obj_${stride}`]={data:new Float32Array(count)};outputs[`bbox_${stride}`]={data:new Float32Array(count*4)};}
-  assert.equal(detectFace(outputs,1,640,640),null);const i=20*80+20;outputs.cls_8.data[i]=outputs.obj_8.data[i]=.99;outputs.bbox_8.data.set([.5,.5,Math.log(4),Math.log(5)],i*4);const face=detectFace(outputs,1,640,640);assert.ok(Math.abs(face.x-148)<1e-4&&Math.abs(face.y-144)<1e-4&&Math.abs(face.w-32)<1e-4);assert.throws(()=>detectFace({},1,640,640),TypeError);
+  assert.equal(detectFace(outputs,1,640,640),null);const i=20*80+20;outputs.cls_8.data[i]=outputs.obj_8.data[i]=.99;outputs.bbox_8.data.set([.5,.5,Math.log(4),Math.log(5)],i*4);outputs.kps_8={data:new Float32Array(6400*10)};outputs.kps_8.data.set([.1,.2,.5,.2,.3,.4,.2,.7,.6,.7],i*10);const face=detectFace(outputs,1,640,640);assert.ok(Math.abs(face.x-148)<1e-4&&Math.abs(face.y-144)<1e-4&&Math.abs(face.w-32)<1e-4);assert.equal(face.landmarks.length,5);assert.ok(Math.abs(face.landmarks[0].x-160.8)<1e-4&&Math.abs(face.landmarks[0].y-161.6)<1e-4);assert.throws(()=>detectFace({},1,640,640),TypeError);
 });
 
 test('conservative portrait consolidation preserves long head outlines and is blank and error safe',()=>{

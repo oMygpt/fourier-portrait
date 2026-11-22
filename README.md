@@ -97,7 +97,9 @@ $$z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt},\quad t\in[0,1]$$
 
 上传先在同一个 Worker 中运行 YuNet（640px、BGR）与 MODNet q8（512px、RGB -1…1）。人脸裁切留出头发、下巴与肩部余量；仅当人物 matte 外的边缘密度和边缘占比同时超过阈值才抠去背景。任何预处理模型下载或推理失败都回到原图描线；描线模型失败仍可回退 XDoG。模型使用 Cache API 按公共资源 URL 缓存，有阶段提示，也可手动取消。图像及 matte 不持久存储。
 
-矢量化以人脸加权，保护头发与横向外轮廓；仅合并近距离且切线一致的端点，面部间隙最多 1px，不平滑五官或外轮廓。通常最多保留 120 条重要笔画，细节控制仍会调整短笔画过滤。六个名人的两种 `samples/*-{contour,anime}.png` 已通过相同浏览器 Worker 重生成，`samples/portraits.json` 保存对应面部坐标；样例无需下载模型。
+干净背景（包括黑白老照片）或未检出人脸时完全沿用 main 的原始输入、描线与笔画分析，不做自动裁切或 120 笔画筛选。六个名人的两种 `samples/*-{contour,anime}.png` 恢复为 main 的预绘资源，元数据标记为 `original`，样例无需下载模型。
+
+只有复杂背景的人像才应用增强：保留原图顶部和完整横向范围，向下留出肩部，必要时白色补边，目标脸框占画面高度约 35%。YuNet 的双眼、鼻尖与嘴角映射为眼眉、鼻和嘴部保护区；这些区域的笔画不按长度或重要性丢弃、不参与端点合并，也不做外围平滑。保护笔画不受 120 条上限限制，其余轮廓才采用保守切线合并与优先级筛选。对照验收同时比较自动 N 的最终傅里叶画像，而不只看原始线稿。
 
 - [carolineec/informative-drawings](https://github.com/carolineec/informative-drawings)，Chan et al., CVPR 2021，MIT（见 `models/LICENSE`）。
 - [x-Liola-x/informative-drawings-onnx](https://huggingface.co/x-Liola-x/informative-drawings-onnx)，MIT，提供 contour512 / anime512 ONNX 导出。运行时仅访问本仓库 `models/`，不访问 HuggingFace。

@@ -8,6 +8,7 @@ import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
+import {featureRegions} from './portrait-preprocess.mjs';
 
 const $ = id => document.getElementById(id);
 let palette='ink';
@@ -125,13 +126,13 @@ async function prepare(image,sampleId,token) {
   const work=document.createElement('canvas'), ratio=Math.min(1,400/Math.max(image.naturalWidth,image.naturalHeight));
   work.width=Math.max(4,Math.round(image.naturalWidth*ratio));work.height=Math.max(4,Math.round(image.naturalHeight*ratio));
   const wc=work.getContext('2d',{willReadFrequently:true});wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.drawImage(image,0,0,work.width,work.height);
-  let binary,renderer='XDoG',fallback=false,face=null;
+  let binary,renderer='XDoG',fallback=false,face=null,landmarks=[];
   if(style!=='classic')try{
     let gray;
     if(sampleId){
       const precomputed=new Image();precomputed.src=`samples/${sampleId}-${style}.png`;await precomputed.decode();
       const ratio=Math.min(1,400/Math.max(precomputed.naturalWidth,precomputed.naturalHeight));work.width=Math.max(4,Math.round(precomputed.naturalWidth*ratio));work.height=Math.max(4,Math.round(precomputed.naturalHeight*ratio));
-      try{const metadata=await (await fetch('samples/portraits.json')).json();face=metadata[sampleId]?.face||null;}catch{}
+      try{const metadata=await (await fetch('samples/portraits.json')).json();face=metadata[sampleId]?.face||null;landmarks=metadata[sampleId]?.landmarks||[];}catch{}
       const preview=document.createElement('canvas');preview.width=work.width;preview.height=work.height;const pc=preview.getContext('2d',{willReadFrequently:true});pc.drawImage(precomputed,0,0,work.width,work.height);
       const rgba=pc.getImageData(0,0,work.width,work.height).data;gray=Uint8Array.from({length:work.width*work.height},(_,i)=>rgba[i*4]);
       renderer=style==='anime'?'预绘素描线稿':'预绘清晰轮廓';
@@ -139,25 +140,25 @@ async function prepare(image,sampleId,token) {
       if(token===generation)$('use-classic').hidden=false;
       const result=await modelLineArt(image,style,progress=>{if(token===generation)$('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);});
       if(token===generation)$('use-classic').hidden=true;
-      gray=result.gray;face=result.face;work.width=result.width;work.height=result.height;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
+      gray=result.gray;face=result.face;landmarks=result.landmarks;work.width=result.width;work.height=result.height;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
     }
-    binary=thresholdSketch(gray,work.width,work.height,Number($('detail').value),Number($('style').value));
+    binary=thresholdSketch(gray,work.width,work.height,Number($('detail').value),Number($('style').value),featureRegions(landmarks,face));
   }catch{fallback=true;renderer='XDoG';}
   if(!binary)binary=xdog(wc.getImageData(0,0,work.width,work.height).data,work.width,work.height,styleParameters(Number($('style').value),Number($('detail').value)));
   const minLength=(renderer==='XDoG'?8:18)-Number($('detail').value)*(renderer==='XDoG'?.08:.16);
-  const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG',face),{strokes}=analysis;
+  const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG',face,landmarks),{strokes}=analysis;
   wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.strokeStyle='#161512';wc.lineWidth=1.15;wc.lineJoin='round';wc.lineCap='round';
   for(const stroke of strokes){wc.beginPath();wc.moveTo(stroke[0].x,stroke[0].y);for(const p of stroke.slice(1))wc.lineTo(p.x,p.y);wc.stroke();}
   return {...analysis,sketch:work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,elapsed:Math.round(performance.now()-started)};
 }
 
-function analyze(binary,width,height,minLength,portrait,face){
-  if(!globalThis.Worker)return Promise.resolve(analyzeSketch(binary,width,height,minLength,portrait,face));
+function analyze(binary,width,height,minLength,portrait,face,landmarks){
+  if(!globalThis.Worker)return Promise.resolve(analyzeSketch(binary,width,height,minLength,portrait,face,landmarks));
   return new Promise((resolve,reject)=>{
     const worker=new Worker(new URL('./path-worker.mjs',import.meta.url),{type:'module'});
     worker.onmessage=({data})=>{worker.terminate();data.error?reject(Error(data.error)):resolve(data.result);};
     worker.onerror=event=>{event.preventDefault();worker.terminate();reject(Error('线条处理失败，请重试。'));};
-    worker.postMessage({binary,width,height,minLength,portrait,face},[binary.buffer]);
+    worker.postMessage({binary,width,height,minLength,portrait,face,landmarks},[binary.buffer]);
   });
 }
 
@@ -365,9 +366,10 @@ function drawSurface(surface,alpha=1,drawing=false) {
 
 function drawChain(values,origin,rotation=0,emphasis=1) {
   let {x,y}=origin;
+  const weight=Math.max(emphasis,1.2*900/canvas.getBoundingClientRect().width);
   for(const c of values){
     const a=c.phase+2*Math.PI*c.k*time+rotation,r=c.amplitude*plot.scale,nx=x+r*Math.cos(a),ny=y+r*Math.sin(a);
-    if($('circles').checked&&r>.6){ctx.strokeStyle=emphasis>1?colors().strong:colors().guide;ctx.lineWidth=emphasis;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle=colors().guide;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(nx,ny);ctx.stroke();}x=nx;y=ny;
+    if($('circles').checked&&r>.6){ctx.strokeStyle=r>8?colors().strong:colors().guide;ctx.lineWidth=r>8?weight:weight*.65;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle=r>8?colors().accent+'AA':colors().guide;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(nx,ny);ctx.stroke();}x=nx;y=ny;
   }
   return {x,y};
 }
@@ -393,13 +395,13 @@ function render() {
   }
   ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio,palette).glow):reduced.matches?0:colors().glow;ctx.shadowColor=drawingInk().shadow;ctx.drawImage(trail,0,0,900,900);ctx.shadowBlur=0;
   if(shared&&stage==='result')return;
-  if(stage==='result')ctx.globalAlpha=.5;
+  if(stage==='result')ctx.globalAlpha=.8;
   let tip;
   if(mode==='xy'){
-    const X=drawChain(activeX,topChain,0,1.8),Y=drawChain(activeY,leftChain,Math.PI/2);
+    const X=drawChain(activeX,topChain,0,2),Y=drawChain(activeY,leftChain,Math.PI/2,2);
     tip={x:X.x,y:Y.y};
     ctx.strokeStyle=colors().accent+'70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle=colors().text;ctx.font='26px "Noto Serif SC",serif';ctx.textAlign='center';ctx.fillText('X · x(t)',150,180);ctx.fillText('Y · y(t)',150,870);ctx.textAlign='left';
+    ctx.fillStyle=colors().text;ctx.font=`${Math.max(26,12*900/canvas.getBoundingClientRect().width)}px "Noto Serif SC",serif`;ctx.textAlign='right';ctx.fillText('X · x(t)',210,180);ctx.textAlign='center';ctx.save();ctx.translate(12,530);ctx.rotate(-Math.PI/2);ctx.fillText('Y · y(t)',0,0);ctx.restore();ctx.textAlign='left';
     for(const p of [X,Y]){ctx.beginPath();ctx.arc(p.x,p.y,2.5,0,Math.PI*2);ctx.fill();}
   }else tip=drawChain(active,{x:plot.x,y:plot.y});
   ctx.globalAlpha=1;

@@ -1,68 +1,32 @@
 {
   "fourier": {
-    "face": [
-      86.12412732304787,
-      76.74485678884085,
-      100.47106271834056,
-      126.57744921449627
-    ],
-    "mattingUsed": false,
-    "width": 272,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   },
   "einstein": {
-    "face": [
-      98.81866915667578,
-      79.58152050408239,
-      132.7040329844847,
-      193.99451028043995
-    ],
-    "mattingUsed": false,
-    "width": 300,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   },
   "newton": {
-    "face": [
-      83.72966472276705,
-      62.919765849331036,
-      98.39601687073275,
-      132.15414028788405
-    ],
-    "mattingUsed": false,
-    "width": 264,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   },
   "curie": {
-    "face": [
-      82.01745995087332,
-      97.41289902458549,
-      115.08789642248739,
-      149.76345636512795
-    ],
-    "mattingUsed": false,
-    "width": 294,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   },
   "euler": {
-    "face": [
-      86.87617428377636,
-      81.80856130225725,
-      102.0033289735443,
-      131.71738343033658
-    ],
-    "mattingUsed": false,
-    "width": 276,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   },
   "gauss": {
-    "face": [
-      84.16412636832946,
-      72.38267513647976,
-      98.73241956592777,
-      128.23893635685354
-    ],
-    "mattingUsed": false,
-    "width": 267,
-    "height": 400
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   }
 }
