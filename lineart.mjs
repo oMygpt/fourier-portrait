@@ -17,6 +17,35 @@ export function styleParameters(style = 50, detail = 50) {
   return {sigma: .9 + s * 1.2, k: 1.45 + s * .3, p: 45 + s * 20, epsilon: -.02 + detail * .0008 + s * .02, phi: 8 + s * 12};
 }
 
+export function thresholdSketch(gray,width,height,detail=50,style=50){
+  if(gray.length!==width*height||width<1||height<1)throw new RangeError('Invalid sketch dimensions');
+  const histogram=new Uint32Array(256);let total=0;
+  for(const v of gray){histogram[v]++;total+=v;}
+  let count=0,sum=0,best=0,threshold=127;
+  for(let i=0;i<255;i++){
+    count+=histogram[i];sum+=i*histogram[i];if(!count||count===gray.length)continue;
+    const difference=sum/count-(total-sum)/(gray.length-count),variance=count*(gray.length-count)*difference*difference;
+    if(variance>best){best=variance;threshold=i;}
+  }
+  threshold=Math.max(90,Math.min(235,threshold+30+(detail-50)*.8+(style-50)*.4));
+  const binary=Uint8Array.from(gray,v=>v<threshold?0:255),visited=new Uint8Array(gray.length);
+  const minimum=Math.max(3,Math.round(14-detail*.16));
+  for(let start=0;start<binary.length;start++){
+    if(binary[start]||visited[start])continue;
+    const component=[start];visited[start]=1;
+    for(let j=0;j<component.length;j++){
+      const p=component[j],x=p%width,y=Math.floor(p/width);
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx,ny=y+dy,next=ny*width+nx;
+        if(nx<0||ny<0||nx>=width||ny>=height||visited[next]||binary[next])continue;
+        visited[next]=1;component.push(next);
+      }
+    }
+    if(component.length<minimum)for(const p of component)binary[p]=255;
+  }
+  return binary;
+}
+
 export function xdog(rgba, width, height, parameters = styleParameters()) {
   if (rgba.length !== width * height * 4 || width < 1 || height < 1) throw new RangeError('Invalid image dimensions');
   const {sigma, k, p, epsilon, phi} = parameters;
