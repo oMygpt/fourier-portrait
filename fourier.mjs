@@ -90,3 +90,9 @@ export function axisEnvelope(coefficients) {
   radius+=Math.PI*speed/samples;
   return {radius, band:band+1e-7};
 }
+
+export function xyLayout(dimensions,X,Y){
+  const w=dimensions.width/2,h=dimensions.height/2;
+  const scale=Math.min(570/Math.max(dimensions.width,dimensions.height),310/Math.max(1,X.radius,Y.radius),125/Math.max(1,X.band,Y.band),345/Math.max(1,w+Y.band,h+X.band));
+  return {plot:{x:530,y:530,scale},top:{x:530,y:160},left:{x:160,y:530}};
+}

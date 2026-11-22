@@ -1,10 +1,54 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope} from './fourier.mjs';
+import {createRequire} from 'node:module';
+import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
 import {selectTerms,formulaBody,latexDocument} from './portrait.mjs';
-import {encodePortrait,decodePortrait,cleanName} from './share.mjs';
+import {encodePortrait,decodePortrait,cleanName,bytesToDecimal,decimalToBytes,shareQrSegments,shareQrBits,SHARE_BASE} from './share.mjs';
 import {analyzeSketch} from './path.mjs';
+import {numericExcerpt} from './card.mjs';
+
+test('decimal transport preserves every tail length, zero padding and 40-bit blocks',()=>{
+  for(const length of [...Array.from({length:32},(_,i)=>i),4096])for(const fill of [0,255,-1]){
+    const bytes=Uint8Array.from({length},(_,i)=>fill<0?(i*173+81)%256:fill),digits=bytesToDecimal(bytes);
+    assert.match(digits,/^[0-4]\d*$/);assert.deepEqual(decimalToBytes(digits),bytes);
+  }
+  assert.equal(bytesToDecimal(new Uint8Array()),'0');
+  assert.equal(bytesToDecimal(new Uint8Array(5).fill(255)),'01099511627775');
+  assert.equal(bytesToDecimal(Uint8Array.of(0)),'1000');
+  for(const invalid of ['', '5', '00', '1256', '299999', '0'+'9'.repeat(13), '1x00', '0'.repeat(10652)])assert.throws(()=>decimalToBytes(invalid),RangeError);
+  assert.throws(()=>bytesToDecimal([]),TypeError);assert.throws(()=>bytesToDecimal(new Uint8Array(4097)),RangeError);
+});
+
+test('vendored QR encoder uses separate Byte and Numeric segments within v18',()=>{
+  const qrcode=createRequire(import.meta.url)('./qrcode.js');
+  const bytes=Uint8Array.from({length:610},(_,i)=>(i*173+81)%256),url=SHARE_BASE+'#n'+bytesToDecimal(bytes),segments=shareQrSegments(url);
+  assert.deepEqual(segments.map(s=>s.mode),['Byte','Numeric']);assert.equal(segments[0].data,SHARE_BASE+'#n');
+  assert.equal(segments.map(s=>s.data).join(''),url);assert.ok(shareQrBits(url)<=5760);
+  const mixed=qrcode(0,'L');for(const segment of segments)mixed.addData(segment.data,segment.mode);mixed.make();assert.ok(mixed.getModuleCount()<=89);
+  const legacy=SHARE_BASE+'#p='+Buffer.from(bytes).toString('base64url'),plain=qrcode(0,'L');plain.addData(legacy,'Byte');plain.make();assert.ok(mixed.getModuleCount()<plain.getModuleCount());
+  assert.deepEqual(shareQrSegments(legacy),[{data:legacy,mode:'Byte'}]);
+});
+
+test('card excerpts combine real conjugate terms and handle empty and invalid coefficients',()=>{
+  const pair=[{k:1,amplitude:2,phase:.4},{k:-1,amplitude:2,phase:-.4}];
+  assert.equal(numericExcerpt(pair),'4 cos(2πt + 0.4)');
+  assert.match(numericExcerpt(pair,false),/e⁽/);
+  assert.equal(numericExcerpt([]),'0');
+  assert.throws(()=>numericExcerpt([{k:NaN,amplitude:2,phase:0}]),RangeError);
+});
+
+test('balanced XY bands remain in bounds and do not overlap the centered drawing',()=>{
+  for(const dimensions of [{width:316,height:400},{width:400,height:180}])for(const size of [0,50,200]){
+    const X={radius:size,band:size/3},Y={radius:size*2,band:size/2},layout=xyLayout(dimensions,X,Y),{plot,top,left}=layout,s=plot.scale;
+    assert.deepEqual([plot.x,plot.y],[530,530]);
+    assert.ok(top.x+X.radius*s<=840&&top.x-X.radius*s>=35);
+    assert.ok(left.y+Y.radius*s<=840&&left.y-Y.radius*s>=35);
+    assert.ok(top.y-X.band*s>=35&&left.x-Y.band*s>=35);
+    assert.ok(top.y+X.band*s+24<=plot.y-dimensions.height*s/2);
+    assert.ok(left.x+Y.band*s+24<=plot.x-dimensions.width*s/2);
+  }
+});
 
 test('worker sketch analysis prepares Fourier chains and rejects empty or invalid sketches',()=>{
   const binary=new Uint8Array(32*32).fill(255);
@@ -37,18 +81,26 @@ test('versioned portrait URLs preserve both modes, pen lifts and bounded reconst
   const chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};
   for(const mode of ['xy','complex']){
     const encoded=encodePortrait({mode,chains,path,dimensions:{width:200,height:200},name:'Ada <3\n'},'https://example.org/portrait/');
-    assert.ok(encoded.url.length<=2000);assert.ok(encoded.energy>=.99);
+    assert.ok(encoded.qrBits<=5760);assert.ok(encoded.energy>=.99);assert.match(encoded.url,/#n[0-4]\d+$/);
     const decoded=decodePortrait(encoded.url);
     assert.equal(decoded.mode,mode);assert.equal(decoded.name,'Ada 3');
     assert.deepEqual(decoded.path.map(p=>p.draw),path.map(p=>p.draw));
     const error=path.reduce((sum,p,i)=>sum+Math.hypot(p.x-decoded.path[i].x,p.y-decoded.path[i].y),0)/path.length;
     assert.ok(error<1,`round-trip error ${error}`);
     assert.deepEqual(decoded.dimensions,{width:200,height:200});
+    const legacyV2='#p='+Buffer.from(decimalToBytes(encoded.url.split('#n')[1])).toString('base64url');
+    assert.deepEqual(decodePortrait(legacyV2),decoded);
   }
   assert.ok(Array.from(cleanName('x'.repeat(30))).length<=16);
   assert.throws(()=>decodePortrait('#p=garbage'),/分享链接无效/);
   assert.throws(()=>decodePortrait('#p='+'a'.repeat(5000)),/分享链接无效/);
   assert.throws(()=>encodePortrait({mode:'xy',chains,path:[],dimensions:{width:200,height:200}},'https://example.org/'),/无可分享/);
+  assert.throws(()=>encodePortrait({mode:'xy',chains,path,dimensions:{width:200,height:200}},'https://'+'x'.repeat(900)),/分享地址过长/);
+  assert.throws(()=>decodePortrait('#p=RgIA'),/分享链接无效/);
+  assert.throws(()=>decodePortrait('#n1256'),/分享链接无效/);
+  const legacy=new Uint8Array(30),view=new DataView(legacy.buffer);
+  legacy.set([70,1,1]);view.setUint16(3,8,true);view.setUint16(5,100,true);view.setUint16(7,100,true);view.setUint16(9,1,true);view.setFloat32(13,10,true);view.setFloat32(17,1,true);view.setUint16(21,65535,true);legacy[25]=255;
+  assert.ok(decodePortrait('#p='+Buffer.from(legacy).toString('base64url')).path.every(p=>p.x===10&&p.y===0&&p.draw));
 });
 
 test('automatic terms meet energy and normalized reconstruction error with a bounded minimum',()=>{
