@@ -1,10 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
 import {selectTerms,formulaBody,latexDocument,limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,bytesToDecimal,decimalToBytes,shareQrSegments,shareQrBits,SHARE_BASE} from './share.mjs';
+import {PALETTES,PALETTE_IDS,normalizePalette} from './palettes.mjs';
+import {backgroundComplexity,portraitCrop,detectFace,shouldEnhancePortrait,featureRegions,touchesFeature} from './portrait-preprocess.mjs';
+import {consolidatePortrait} from './strokes.mjs';
 import {analyzeSketch} from './path.mjs';
 import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
@@ -45,13 +50,13 @@ test('visitor ink stays readable and scales glow with the actual DPR backing sto
   assert.throws(()=>visitorInk(0,1),RangeError);assert.throws(()=>visitorInk(344,NaN),RangeError);
 });
 
-test('gold QR uses flat integer modules and an untextured four-module dark quiet zone',()=>{
+test('palette QR uses flat integer modules and an untextured four-module quiet zone',()=>{
   const qrcode=createRequire(import.meta.url)('./qrcode.js'),qr=qrcode(18,'L');qr.addData('a portrait in circles','Byte');qr.make();
   const fills=[],ctx={globalAlpha:.2,shadowBlur:8,fillStyle:'red',save(){this.state=[this.globalAlpha,this.shadowBlur,this.fillStyle];},restore(){[this.globalAlpha,this.shadowBlur,this.fillStyle]=this.state;},fillRect(x,y,w,h){fills.push({x,y,w,h,color:this.fillStyle,alpha:this.globalAlpha,blur:this.shadowBlur});}};
   assert.equal(drawCardQr(ctx,qr,620,996),388);assert.deepEqual(fills[0],{x:620,y:996,w:388,h:388,color:CARD_NIGHT,alpha:1,blur:0});
   for(const r of fills.slice(1)){assert.equal(r.color,CARD_GOLD);assert.equal(r.alpha,1);assert.equal(r.blur,0);assert.equal(r.w,4);assert.equal(r.h,4);assert.equal(r.x%4,0);assert.equal(r.y%4,0);assert.ok(r.x>=636&&r.y>=1012&&r.x+4<=992&&r.y+4<=1368);}
   const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
-  assert.ok((luminance(CARD_GOLD)+.05)/(luminance(CARD_NIGHT)+.05)>10);
+  for(const palette of PALETTE_IDS){fills.length=0;drawCardQr(ctx,qr,620,996,4,palette);assert.equal(fills[0].color,PALETTES[palette].background);assert.ok(fills.slice(1).every(r=>r.color===PALETTES[palette].line));const values=[luminance(PALETTES[palette].line),luminance(PALETTES[palette].background)].sort((a,b)=>a-b);assert.ok((values[1]+.05)/(values[0]+.05)>10);}
   assert.deepEqual([ctx.globalAlpha,ctx.shadowBlur,ctx.fillStyle],[.2,8,'red']);
   for(const unit of [0,3,4.5])assert.throws(()=>drawCardQr(ctx,qr,620,996,unit),RangeError);
   assert.throws(()=>drawCardQr(ctx,qr,620.5,996),RangeError);
@@ -81,10 +86,65 @@ test('guessing flag and sanitized name round-trip in both modes, including anony
     assert.equal(decoded.guess,guess);assert.equal(decoded.name,cleanName(name));
     const wire=decimalToBytes(encoded.url.split('#n')[1]),bytes=inflateSync(wire.subarray(2));
     assert.equal(bytes[1],2);assert.equal(bytes[24],guess?1:0);
-    bytes[24]=2;const invalid=new Uint8Array([...wire.subarray(0,2),...deflateSync(bytes)]);assert.throws(()=>decodePortrait('#n'+bytesToDecimal(invalid)),/分享链接无效/);
+    bytes[24]=7;const invalid=new Uint8Array([...wire.subarray(0,2),...deflateSync(bytes)]);assert.throws(()=>decodePortrait('#n'+bytesToDecimal(invalid)),/分享链接无效/);
   }
   const normal=encodePortrait({mode:'xy',chains,path,dimensions:{width:100,height:100},name:'旧链接'});
   assert.equal(decodePortrait('#p='+Buffer.from(decimalToBytes(normal.url.split('#n')[1])).toString('base64url')).guess,false);
+});
+
+test('share palettes round-trip independently of guessing and default old or unknown palettes to ink',()=>{
+  const path=Array.from({length:24},(_,i)=>({x:20*Math.cos(i*Math.PI/12),y:15*Math.sin(i*Math.PI/12),draw:i%6!==0})),chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};
+  for(const mode of ['xy','complex'])for(const palette of PALETTE_IDS)for(const guess of [false,true]){
+    const encoded=encodePortrait({mode,chains,path,dimensions:{width:100,height:100},name:'圆周',guess,palette}),decoded=decodePortrait(encoded.url);
+    assert.equal(decoded.palette,palette);assert.equal(decoded.guess,guess);assert.equal(decoded.name,'圆周');assert.ok(encoded.qrBits<=5760);
+  }
+  for(const palette of ['',null,undefined,'gold',{},'__proto__']){assert.equal(normalizePalette(palette),'ink');const encoded=encodePortrait({mode:'xy',chains,path,dimensions:{width:100,height:100},palette});assert.equal(decodePortrait(encoded.url).palette,'ink');}
+  const encoded=encodePortrait({mode:'xy',chains,path,dimensions:{width:100,height:100}}),wire=decimalToBytes(encoded.url.split('#n')[1]),bytes=inflateSync(wire.subarray(2));assert.equal(bytes[24],0);assert.equal(decodePortrait('#p='+Buffer.from(wire).toString('base64url')).palette,'ink');
+});
+
+test('portrait background check rejects blank backgrounds and identifies clutter outside a matte',()=>{
+  const width=40,height=40,alpha=new Float32Array(width*height),rgba=new Uint8ClampedArray(width*height*4).fill(255);
+  assert.equal(backgroundComplexity(rgba,alpha,width,height).apply,false);
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let c=0;c<3;c++)rgba[(y*width+x)*4+c]=Math.floor(x/3)%2?255:0;
+  assert.equal(backgroundComplexity(rgba,alpha,width,height).apply,true);alpha.fill(1);assert.equal(backgroundComplexity(rgba,alpha,width,height).apply,false);
+  assert.equal(backgroundComplexity([],[],0,0).apply,false);assert.throws(()=>backgroundComplexity([],alpha,width,height),RangeError);
+  assert.deepEqual(portraitCrop(null,80,100),{x:0,y:0,width:80,height:100});const crop=portraitCrop({x:20,y:20,w:20,h:30},80,100);assert.ok(crop.x<=0&&crop.y===0&&crop.width>=80&&crop.height>=90);assert.throws(()=>portraitCrop(null,0,100),RangeError);
+});
+
+test('bust framing preserves the entire hair width and source top, with head and shoulder margins',()=>{
+  for(const [width,height,face] of [[1024,1280,{x:375,y:88,w:248,h:351}],[960,1280,{x:315,y:254,w:425,h:620}]]){
+    const crop=portraitCrop(face,width,height);assert.ok(crop.x<=0&&crop.x+crop.width>=width&&crop.y===0);assert.ok(face.h/crop.height>=.3&&face.h/crop.height<=.4);assert.ok(crop.height>=face.y+face.h*2.35);
+  }
+  assert.equal(shouldEnhancePortrait({}, {apply:false}),false);assert.equal(shouldEnhancePortrait(null,{apply:true}),false);assert.equal(shouldEnhancePortrait({}, {apply:true}),true);
+});
+
+test('clean sample fallback keeps all twelve main line-art assets and disables enhanced pruning',()=>{
+  const metadata=JSON.parse(readFileSync(new URL('./samples/portraits.json',import.meta.url),'utf8')),hash=createHash('sha256');
+  for(const id of ['fourier','einstein','newton','curie','euler','gauss']){
+    assert.equal(metadata[id].strategy,'original');assert.equal(metadata[id].face,null);assert.deepEqual(metadata[id].landmarks,[]);
+    for(const style of ['contour','anime'])hash.update(readFileSync(new URL(`./samples/${id}-${style}.png`,import.meta.url)));
+  }
+  assert.equal(hash.digest('hex'),'34837fd51461024ffcf3becef13336218762b2b8bd42d236d56e23221f4b8697');
+});
+
+test('landmark-region strokes survive aggressive pruning and cannot merge across features',()=>{
+  const width=120,height=160,face=[30,30,60,85],landmarks=[{x:45,y:60},{x:75,y:60},{x:60,y:86},{x:49,y:104},{x:71,y:104}],binary=new Uint8Array(width*height).fill(255),regions=featureRegions(landmarks,face);
+  for(const [y,a,b] of [[60,45,47],[60,49,51],[86,59,61],[104,56,64]])for(let x=a;x<=b;x++)binary[y*width+x]=0;
+  const strokes=consolidatePortrait(binary,width,height,50,face,landmarks);assert.equal(strokes.length,4);assert.ok(strokes.every(s=>touchesFeature(s,regions)));assert.equal(strokes.filter(s=>s.every(p=>p.y===60)).length,2);assert.deepEqual(featureRegions([],face),[]);assert.equal(touchesFeature([],regions),false);
+  const ordinary=thresholdSketch(binary,width,height,50,50),protectedBinary=thresholdSketch(binary,width,height,50,50,regions);assert.equal(ordinary[60*width+45],255);assert.equal(protectedBinary[60*width+45],0);assert.equal(protectedBinary[86*width+60],0);assert.equal(consolidatePortrait(protectedBinary,width,height,50,face,landmarks).length,4);
+  const dense=new Uint8Array(width*height).fill(255);let count=0;
+  for(let y=48;y<=112;y+=4)for(let x=32;x<=88;x+=4)if(touchesFeature([{x,y},{x:x+1,y}],regions)){dense[y*width+x]=dense[y*width+x+1]=0;count++;}
+  assert.ok(count>120);assert.equal(consolidatePortrait(thresholdSketch(dense,width,height,50,50,regions),width,height,50,face,landmarks).length,count);
+});
+
+test('YuNet decoding handles detections, no face, overlap suppression and malformed outputs',()=>{
+  const outputs={};for(const stride of [8,16,32]){const count=(640/stride)**2;outputs[`cls_${stride}`]={data:new Float32Array(count)};outputs[`obj_${stride}`]={data:new Float32Array(count)};outputs[`bbox_${stride}`]={data:new Float32Array(count*4)};}
+  assert.equal(detectFace(outputs,1,640,640),null);const i=20*80+20;outputs.cls_8.data[i]=outputs.obj_8.data[i]=.99;outputs.bbox_8.data.set([.5,.5,Math.log(4),Math.log(5)],i*4);outputs.kps_8={data:new Float32Array(6400*10)};outputs.kps_8.data.set([.1,.2,.5,.2,.3,.4,.2,.7,.6,.7],i*10);const face=detectFace(outputs,1,640,640);assert.ok(Math.abs(face.x-148)<1e-4&&Math.abs(face.y-144)<1e-4&&Math.abs(face.w-32)<1e-4);assert.equal(face.landmarks.length,5);assert.ok(Math.abs(face.landmarks[0].x-160.8)<1e-4&&Math.abs(face.landmarks[0].y-161.6)<1e-4);assert.throws(()=>detectFace({},1,640,640),TypeError);
+});
+
+test('conservative portrait consolidation preserves long head outlines and is blank and error safe',()=>{
+  const width=80,height=100,binary=new Uint8Array(width*height).fill(255),face=[20,20,40,55];for(let y=8;y<90;y++){binary[y*width+10]=0;binary[y*width+70]=0;}for(let x=10;x<=70;x++)binary[8*width+x]=0;
+  const strokes=consolidatePortrait(binary,width,height,10,face);assert.ok(strokes.length>=1&&strokes.length<=120);assert.ok(strokes.flat().some(p=>p.y<=10));assert.ok(strokes.flat().some(p=>p.y>=85));assert.deepEqual(consolidatePortrait(new Uint8Array(width*height).fill(255),width,height,10,face),[]);assert.throws(()=>consolidatePortrait(binary,width,height,10,null),RangeError);assert.throws(()=>consolidatePortrait([],width,height,10,face),RangeError);
 });
 
 test('decimal transport preserves every tail length, zero padding and 40-bit blocks',()=>{

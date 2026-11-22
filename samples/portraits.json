@@ -1,0 +1,32 @@
+{
+  "fourier": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "einstein": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "newton": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "curie": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "euler": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "gauss": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  }
+}

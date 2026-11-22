@@ -1,8 +1,9 @@
 import {evaluate} from './fourier.mjs';
 import {shareQrSegments} from './share.mjs';
 import {PORTRAIT_INK} from './portrait-render.mjs';
+import {getPalette} from './palettes.mjs';
 
-export const CARD_GOLD=PORTRAIT_INK.color,CARD_NIGHT='#161512';
+export const CARD_GOLD=PORTRAIT_INK.color,CARD_NIGHT=getPalette('ink').background;
 
 export function cardStats(mode,chains){
   const values=mode==='xy'?[...chains.x,...chains.y]:chains.complex;
@@ -14,12 +15,13 @@ export function cardStats(mode,chains){
   return {count:values.length,k:dominant?.k??0,radius:largest};
 }
 
-export function drawCardQr(ctx,qr,x,y,unit=4){
+export function drawCardQr(ctx,qr,x,y,unit=4,palette='ink'){
   const modules=qr.getModuleCount();
   if(!Number.isInteger(unit)||unit<4||!Number.isInteger(x)||!Number.isInteger(y))throw new RangeError('二维码必须使用整数像素');
   if(modules<21||modules>89||(modules-17)%4)throw new RangeError('二维码过密，请缩短分享地址。');
   const extent=(modules+8)*unit;
-  ctx.save();ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.fillStyle=CARD_NIGHT;ctx.fillRect(x,y,extent,extent);ctx.fillStyle=CARD_GOLD;
+  const colors=getPalette(palette);
+  ctx.save();ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.fillStyle=colors.background;ctx.fillRect(x,y,extent,extent);ctx.fillStyle=colors.line;
   for(let row=0;row<modules;row++)for(let col=0;col<modules;col++)if(qr.isDark(row,col))ctx.fillRect(x+(col+4)*unit,y+(row+4)*unit,unit,unit);
   ctx.restore();return extent;
 }
@@ -58,31 +60,32 @@ function equation(ctx,axis,values,x,y,width){
   mathLine(ctx,numeric,x,y+43,width,21);
 }
 
-export function renderSocialCard({mode,chains,path,name,guess=false,energy,shareURL},format='34'){
+export function renderSocialCard({mode,chains,path,name,guess=false,energy,shareURL,palette='ink'},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
   const ctx=card.getContext('2d'),h=card.height,story=format==='916',band=h-444;
+  const colors=getPalette(palette),CARD_GOLD=colors.line,CARD_NIGHT=colors.background;
   const box={x:130,y:244,w:820,h:story?1090:690},cy=box.y+box.h/2;
   ctx.fillStyle=CARD_NIGHT;ctx.fillRect(0,0,1080,h);
-  const glow=ctx.createRadialGradient(540,cy,0,540,cy,650);glow.addColorStop(0,'#80562724');glow.addColorStop(1,'#16151200');ctx.fillStyle=glow;ctx.fillRect(0,0,1080,h);
-  for(let i=0;i<360;i++){const y=i*i*137%h;if(y>band-44)continue;ctx.fillStyle=`rgba(224,190,127,${.025+i%4*.009})`;ctx.fillRect(i*173%1080,y,1,1);}
-  ctx.strokeStyle='#ad8b4b40';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
-  ctx.strokeStyle='#d7b06c88';
+  const glow=ctx.createRadialGradient(540,cy,0,540,cy,650);glow.addColorStop(0,colors.accent+'0A');glow.addColorStop(1,colors.background+'00');ctx.fillStyle=glow;ctx.fillRect(0,0,1080,h);
+  for(let i=0;i<(palette==='ink'?22000:360);i++){const y=i*i*137%h;if(y>band-44)continue;ctx.fillStyle=colors.line+(palette==='ink'?'06':'0A');ctx.fillRect(i*173%1080,y,1,1);}
+  ctx.strokeStyle=colors.accent+'40';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
+  ctx.strokeStyle=colors.accent+'88';
   for(const [x,y,sx,sy] of [[36,36,1,1],[1044,36,-1,1],[36,h-36,1,-1],[1044,h-36,-1,-1]]){ctx.beginPath();ctx.moveTo(x+sx*26,y);ctx.lineTo(x,y);ctx.lineTo(x,y+sy*26);ctx.moveTo(x+sx*8,y+sy*8);ctx.lineTo(x+sx*17,y+sy*8);ctx.moveTo(x+sx*8,y+sy*8);ctx.lineTo(x+sx*8,y+sy*17);ctx.stroke();}
   ctx.save();ctx.beginPath();ctx.rect(60,236,960,box.h+28);ctx.clip();
   const radius=story?410:326,vertical=box.h*.47;
-  ctx.strokeStyle='#d7b06c16';
+  ctx.strokeStyle=colors.accent+'16';
   for(const padding of [0,34]){ctx.beginPath();ctx.ellipse(540,cy,radius+padding,vertical+padding,0,0,Math.PI*2);ctx.stroke();}
   for(let i=0;i<48;i++){const a=i*Math.PI/24,len=i%4===0?9:4;ctx.beginPath();ctx.moveTo(540+Math.cos(a)*(radius+34),cy+Math.sin(a)*(vertical+34));ctx.lineTo(540+Math.cos(a)*(radius+34+len),cy+Math.sin(a)*(vertical+34+len));ctx.stroke();}
   ctx.restore();
   ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=1.3;
-  for(const r of [15,10]){ctx.beginPath();ctx.arc(88,83,r,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle=colors.accent;ctx.fillRect(65,55,45,55);ctx.fillStyle=colors.background;ctx.textAlign='center';ctx.font='21px "Noto Serif SC",serif';ctx.fillText('圆',87,78);ctx.fillText('周',87,101);ctx.textAlign='left';
   ctx.fillStyle=CARD_GOLD;ctx.font='25px "Noto Serif SC",serif';ctx.fillText('圆周之间',118,87);
-  ctx.fillStyle='#a38c64';ctx.font='9px sans-serif';tracked(ctx,'PORTRAITS IN ORBIT',119,106,2);
+  ctx.fillStyle=colors.muted;ctx.font='9px sans-serif';tracked(ctx,'PORTRAITS IN ORBIT',119,106,2);
   ctx.font='11px sans-serif';tracked(ctx,guess?'GUESS WHO / 01':'A STUDY OF YOU / 01',1008,84,2,'right');
   const stats=cardStats(mode,chains),title=`我由 ${stats.count} 个圆组成`;ctx.font='48px "Noto Serif SC",serif';const titleSize=Math.min(48,48*936/Math.max(1,ctx.measureText(title).width));
-  ctx.font=`${titleSize}px "Noto Serif SC",serif`;ctx.fillStyle='#eee1c8';ctx.fillText(title,72,179);
-  ctx.fillStyle='#b4a184';ctx.font='16px "Noto Serif SC",serif';ctx.fillText(`${!guess&&name?`${name} · `:''}主频率 k=${stats.k} · 最大的圆 r=${Number(stats.radius.toPrecision(3))}`,74,216);
-  ctx.save();ctx.translate(1006,cy);ctx.rotate(-Math.PI/2);ctx.fillStyle='#a38c6477';ctx.font='10px sans-serif';tracked(ctx,'EVERY LINE, AN ORBIT',-100,0,2);ctx.restore();
+  ctx.font=`${titleSize}px "Noto Serif SC",serif`;ctx.fillStyle=colors.text;ctx.fillText(title,72,179);
+  ctx.fillStyle=colors.muted;ctx.font='16px "Noto Serif SC",serif';ctx.fillText(`${!guess&&name?`${name} · `:''}主频率 k=${stats.k} · 最大的圆 r=${Number(stats.radius.toPrecision(3))}`,74,216);
+  ctx.save();ctx.translate(1006,cy);ctx.rotate(-Math.PI/2);ctx.fillStyle=colors.muted+'77';ctx.font='10px sans-serif';tracked(ctx,'EVERY LINE, AN ORBIT',-100,0,2);ctx.restore();
   const points=[];let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
   for(let i=0;i<=7200;i++){
     const t=i/7200,p=mode==='xy'?{x:evaluate(chains.x,t).x,y:evaluate(chains.y,t).x}:evaluate(chains.complex,t);
@@ -90,16 +93,16 @@ export function renderSocialCard({mode,chains,path,name,guess=false,energy,share
   }
   const scale=Math.min(box.w/Math.max(1,maxX-minX),box.h/Math.max(1,maxY-minY))*.96,cx=540-(minX+maxX)*scale/2,centerY=cy-(minY+maxY)*scale/2;
   ctx.save();ctx.beginPath();points.forEach((p,i)=>{const x=cx+p.x*scale,y=centerY+p.y*scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
-  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=PORTRAIT_INK.width;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=PORTRAIT_INK.glow;ctx.shadowColor=PORTRAIT_INK.shadow;ctx.stroke();ctx.restore();
-  if(story){ctx.fillStyle='#d3b780';ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'圆周知道答案。你猜呢？':'无数个圆，恰好是你。',72,1400);}
+  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=PORTRAIT_INK.width;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=colors.glow;ctx.shadowColor=colors.shadow;ctx.stroke();ctx.restore();
+  if(story){ctx.fillStyle=colors.muted;ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'圆周知道答案。你猜呢？':'无数个圆，恰好是你。',72,1400);}
   const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
-  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2));
-  ctx.strokeStyle='#ad8b4b55';ctx.beginPath();ctx.moveTo(72,band-28);ctx.lineTo(1008,band-28);ctx.stroke();
-  ctx.fillStyle='#a38c64';ctx.font='11px sans-serif';tracked(ctx,'THE EQUATION /',72,band+23,2);
+  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2),4,palette);
+  ctx.strokeStyle=colors.accent+'55';ctx.beginPath();ctx.moveTo(72,band-28);ctx.lineTo(1008,band-28);ctx.stroke();
+  ctx.fillStyle=colors.muted;ctx.font='11px sans-serif';tracked(ctx,'THE EQUATION /',72,band+23,2);
   const groups=mode==='xy'?[['x',chains.x],['y',chains.y]]:[['z',chains.complex]];
   ctx.fillStyle=CARD_GOLD;groups.forEach(([axis,c],i)=>equation(ctx,axis,c,72,band+80+i*104,480));
-  ctx.fillStyle='#eee1c8';ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'扫码，看圆画出我是谁':'扫码，看圆把我画出来',72,band+302);
-  ctx.fillStyle='#bca98a';ctx.font='17px sans-serif';ctx.fillText(groups.map(([axis,c])=>`${axis.toUpperCase()} ${c.length} 项`).join(' / ')+` · 扫码保留 ${(energy*100).toFixed(1)}% 能量`,72,band+344);
-  ctx.fillStyle='#a6977d';ctx.font='13px sans-serif';ctx.fillText('照片不上传 · 链接仅含数学系数与笔画',72,h-58);
+  ctx.fillStyle=colors.text;ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'扫码，看圆画出我是谁':'扫码，看圆把我画出来',72,band+302);
+  ctx.fillStyle=colors.muted;ctx.font='17px sans-serif';ctx.fillText(groups.map(([axis,c])=>`${axis.toUpperCase()} ${c.length} 项`).join(' / ')+` · 扫码保留 ${(energy*100).toFixed(1)}% 能量`,72,band+344);
+  ctx.fillStyle=colors.muted;ctx.font='13px sans-serif';ctx.fillText('照片不上传 · 链接仅含数学系数与笔画',72,h-58);
   return {canvas:card,qrVersion:(modules-17)/4};
 }

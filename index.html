@@ -2,20 +2,20 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#161512"><meta name="description" content="照片化作线条，圆周重新描绘你。完全本地运行的 AI 线条画与双轴傅里叶人像。">
-  <title>圆周之间 · 以星轨，描绘你</title><link rel="icon" href="data:,">
+  <meta name="theme-color" content="#F4EFE6"><meta name="description" content="照片化作线条，圆周重新描绘你。完全本地运行的 AI 线条画与双轴傅里叶人像。">
+  <title>圆周之间 · 以圆周，描绘你</title><link rel="icon" href="data:,">
   <link rel="stylesheet" href="vendor/fonts/fonts.css">
   <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="vendor/katex/katex.min.css">
   <script defer src="vendor/katex/katex.min.js"></script><script defer src="qrcode.js"></script><script type="module" src="app.js"></script>
 </head>
-<body data-stage="landing">
+<body data-stage="landing" data-palette="ink">
   <div class="grain" aria-hidden="true"></div>
-  <header><a class="brand" href="./"><span class="seal" aria-hidden="true">◎</span><span>圆周之间<small>FOURIER PORTRAIT</small></span></a><nav><a href="#formula" id="formula-link">揭开公式 <span>↗</span></a><span class="private"><i></i> 影像不离开你的设备</span></nav></header>
+  <header><a class="brand" href="./"><span class="seal" aria-hidden="true">圆周</span><span>圆周之间<small>FOURIER PORTRAIT</small></span></a><nav><a href="#formula" id="formula-link">揭开公式 <span>↗</span></a><span class="private"><i></i> 影像不离开你的设备</span></nav></header>
   <main>
     <section class="observatory" id="observatory" aria-label="傅里叶人像创作室">
       <div class="invitation">
         <div class="eyebrow" id="chapter">A PORTRAIT WRITTEN IN ORBITS</div>
-        <h1 id="heading">每个人，<br>都有自己的<em>星轨。</em></h1>
+        <h1 id="heading">每个人，<br>都有自己的<em>圆周。</em></h1>
         <p class="story" id="story">让一张照片，化作一幅线条画。<br>再借无数个旋转的圆，慢慢将你唤回。</p>
         <div class="landing-actions"><button class="primary" id="choose">上传你的照片 <span>↗</span></button><p class="upload-hint">也可拖入 JPG / PNG · 全程本地计算</p></div>
         <div class="journey" aria-label="创作步骤"><span id="step-sketch">01 <b>凝成线条</b></span><span id="step-draw">02 <b>唤醒圆周</b></span><span id="step-result">03 <b>留住此刻</b></span></div>
@@ -28,7 +28,7 @@
         <div class="instrument-top"><span class="eyebrow">THE CELESTIAL PLOTTER</span><span class="edition">N° 001 / 本地观测</span></div>
         <div class="mode-tabs" aria-label="傅里叶绘制模式"><button data-mode="xy" aria-pressed="true">双轴 XY</button><button data-mode="complex" aria-pressed="false">复平面单链</button></div>
         <div class="view-tabs" id="view-tabs" aria-label="查看创作阶段"><button data-view="photo" aria-pressed="false">原图</button><button data-view="sketch" aria-pressed="false">线条画</button><button data-view="fourier" aria-pressed="true">傅里叶绘制</button></div>
-        <div class="lens"><div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div><span class="cardinal north" aria-hidden="true">✦</span><span class="cardinal south" aria-hidden="true">∞</span><canvas id="canvas" width="900" height="900" aria-label="人像、线条画与傅里叶星轨画布"></canvas><span class="lens-note" id="lens-note">每一笔，都是圆的回声</span></div>
+        <div class="lens"><div class="orbit orbit-one" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div><span class="cardinal north" aria-hidden="true">✦</span><span class="cardinal south" aria-hidden="true">∞</span><canvas id="canvas" width="900" height="900" aria-label="人像、线条画与傅里叶圆周画布"></canvas></div><span class="lens-note" id="lens-note">每一笔，都是圆的回声</span>
         <div class="instrument-bottom"><span id="source-label">示例 / 约瑟夫·傅里叶</span><span id="progress">00%</span></div><div class="progress-track"><div id="progress-bar"></div></div>
       </div>
       <input id="upload" type="file" accept="image/jpeg,image/png" hidden>
@@ -54,6 +54,6 @@
     </div></details></section>
     <section class="privacy-note"><span aria-hidden="true">⌑</span><div>你的照片，只属于你。<p>没有上传，没有存储。所有绘制都发生在这台设备的浏览器里。</p></div></section>
   </main>
-  <dialog id="card-dialog" aria-labelledby="card-title"><div class="card-heading"><div><span class="eyebrow">A LITTLE MATHEMATICS. ALL YOURS.</span><h2 id="card-title">把这一刻，分享给世界。</h2></div><button id="close-card" class="quiet" aria-label="关闭分享卡片">✕</button></div><div class="card-editor"><div class="card-preview"><img id="card-preview" alt="你的傅里叶公式分享卡片预览"></div><div class="card-options"><label>为星轨署名（可选）<input id="card-name" maxlength="32" placeholder="你的名字 / 昵称"></label><label class="guess-toggle"><input id="card-guess" type="checkbox">猜猜我是谁<span>卡片不署名，画完才揭晓；名字仍在链接中，并非加密。</span></label><label>卡片比例<select id="card-format"><option value="34">3:4 · 小红书 / 朋友圈</option><option value="916">9:16 · Story</option></select></label><p>照片留在你的设备。二维码只携带数学系数，让朋友看到圆周如何画出你。</p><button id="save-card" class="primary">↓ 保存分享卡片</button><button id="system-share" class="quiet">系统分享 ↗</button><button id="copy-link" class="quiet">复制链接</button><input id="share-url" readonly aria-label="画像分享链接"><p id="card-status" role="status"></p></div></div></dialog>
+  <dialog id="card-dialog" aria-labelledby="card-title"><div class="card-heading"><div><span class="eyebrow">A LITTLE MATHEMATICS. ALL YOURS.</span><h2 id="card-title">把这一刻，分享给世界。</h2></div><button id="close-card" class="quiet" aria-label="关闭分享卡片">✕</button></div><div class="card-editor"><div class="card-preview"><img id="card-preview" alt="你的傅里叶公式分享卡片预览"></div><div class="card-options"><label>为画像署名（可选）<input id="card-name" maxlength="32" placeholder="你的名字 / 昵称"></label><label>纸与墨<select id="card-palette"><option value="ink">墨白朱印</option><option value="navy">星图蓝</option><option value="silver">月光银</option></select></label><label class="guess-toggle"><input id="card-guess" type="checkbox">猜猜我是谁<span>卡片不署名，画完才揭晓；名字仍在链接中，并非加密。</span></label><label>卡片比例<select id="card-format"><option value="34">3:4 · 小红书 / 朋友圈</option><option value="916">9:16 · Story</option></select></label><p>照片留在你的设备。二维码只携带数学系数，让朋友看到圆周如何画出你。</p><button id="save-card" class="primary">↓ 保存分享卡片</button><button id="system-share" class="quiet">系统分享 ↗</button><button id="copy-link" class="quiet">复制链接</button><input id="share-url" readonly aria-label="画像分享链接"><p id="card-status" role="status"></p></div></div></dialog>
   <footer><span>圆周之间 <i>·</i> MADE OF CIRCLES & CURIOSITY</span><span>样例肖像：<a href="#sample-credits" id="credits-link">Wikimedia Commons · 公有领域</a></span><details id="sample-credits"><summary>查看肖像来源与鸣谢</summary><div id="credits"></div><p><a href="https://github.com/carolineec/informative-drawings">informative-drawings · Chan et al., CVPR 2021</a> · <a href="https://huggingface.co/x-Liola-x/informative-drawings-onnx">x-Liola-x ONNX</a> · <a href="https://github.com/microsoft/onnxruntime">onnxruntime-web</a>（均为 MIT）<br>XDoG / Winnemöller et al. 2012 · 笔画连接灵感：<a href="https://github.com/LingDong-/linedraw">LingDong-/linedraw (MIT)</a> · QR: Kazuhiko Arase（MIT）</p></details></footer>
 </body></html>
