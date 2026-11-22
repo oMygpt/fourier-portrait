@@ -1,7 +1,7 @@
 import {dft,realDft,evaluate,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog, styleParameters, thresholdSketch} from './lineart.mjs';
 import {modelLineArt,cancelLineArt} from './ml-client.mjs';
-import {formulaBody, latexDocument} from './portrait.mjs';
+import {formulaBody, latexDocument, limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,SHARE_BASE} from './share.mjs';
 import {renderSocialCard} from './card.mjs';
 import {analyzeSketch} from './path.mjs';
@@ -20,7 +20,7 @@ let xCoefficients = [], yCoefficients = [], activeX = [], activeY = [];
 let mode = 'xy', plot = {x:450,y:450,scale:1}, topChain = {x:450,y:150}, leftChain = {x:150,y:450};
 let automatic = null, manual = false;
 let shared = false, cardSurface = null, cardPayload = null, cardGeneration = 0;
-let sharedName = '';
+let sharedName = '', sharedGuess = false, scrubPending = false;
 let currentSampleId = '';
 let automaticBounds = null;
 let dimensions = {width:360,height:360}, scale = 1, time = 0, drawn = 0;
@@ -46,10 +46,16 @@ function setStage(next) {
     result:['03 / A MOMENT, PRESERVED','此刻，<br><em>留在圆周之间。</em>','无数个圆，终于相遇成一个你。<br>把这一刻带走，或再看星轨走过一遍。','每一笔，都是圆的回声'],
   }[next];
   if (content) { $('chapter').textContent=content[0];$('heading').innerHTML=content[1];$('story').innerHTML=content[2];$('lens-note').textContent=content[3]; }
-  if(shared)$('heading').textContent=sharedName?`${sharedName}的傅里叶肖像`:'一份写在圆周里的肖像';
+  if(shared){
+    const hiddenName=sharedGuess&&next!=='result';
+    $('heading').textContent=hiddenName?'猜猜这是谁？':sharedName?sharedGuess?`${sharedName}，原来是你。`:`${sharedName}的傅里叶肖像`:'一份写在圆周里的肖像';
+    $('heading').classList.toggle('name-revealed',sharedGuess&&next==='result');
+    $('source-label').textContent=hiddenName?'圆周正在保守秘密':sharedName||'分享的傅里叶肖像';
+    $('shared-controls').hidden=next!=='result';
+  }
   if(shared&&next==='result'){
     plot={x:450,y:450,scale};drawn=0;ink.clearRect(0,0,900,900);drawTrail(resolution);
-    $('heading').textContent=sharedName?`${sharedName}的傅里叶肖像`:'一份写在圆周里的肖像';$('story').textContent='这是由数学系数重建的肖像。你的照片，也有自己的星轨。';
+    $('story').textContent='这是由数学系数重建的肖像。你的照片，也有自己的星轨。';
   }
   if(next==='sketch') setView('sketch');
   if(next==='reveal'||next==='drawing'||next==='result') setView('fourier');
@@ -61,6 +67,7 @@ function reset(reveal = false) {
   active = coefficients.slice(0,manual?count:automatic?.complex.count); time=0;drawn=0;playing=true;
   activeX=xCoefficients.slice(0,manual?count:automatic?.x.count);activeY=yCoefficients.slice(0,manual?count:automatic?.y.count);
   layout();readout();
+  if(shared){const count=mode==='xy'?activeX.length+activeY.length:active.length;$('shared-terms').value=String(count);$('shared-count').value=`${count} / ${count} 个圆`;}
   ink.clearRect(0,0,900,900);$('terms-value').value=mode==='xy'?`X ${activeX.length} / Y ${activeY.length}`:String(active.length);
   if(!manual)$('terms').value=String(mode==='xy'?Math.max(activeX.length,activeY.length):active.length);
   if(automatic){
@@ -253,7 +260,7 @@ async function createCard(){
   try{
     await document.fonts.ready;await Promise.all(['24px KaTeX_Main','italic 24px KaTeX_Math','36px KaTeX_Size2'].map(font=>document.fonts.load(font)));await new Promise(resolve=>requestAnimationFrame(resolve));
     if(token!==cardGeneration)return;
-    const snapshot={mode,chains:currentChains(),path,dimensions,name:cleanName($('card-name').value)};
+    const snapshot={mode,chains:currentChains(),path,dimensions,name:cleanName($('card-name').value),guess:$('card-guess').checked};
     const payload=encodePortrait(snapshot,SHARE_BASE);
     const card=renderSocialCard({...snapshot,energy:payload.energy,shareURL:payload.url},$('card-format').value);
     cardSurface=card.canvas;cardPayload=payload;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
@@ -263,7 +270,17 @@ async function createCard(){
 }
 $('open-card').addEventListener('click',()=>{$('card-dialog').showModal();createCard();});
 $('close-card').addEventListener('click',()=>$('card-dialog').close());
-for(const id of ['card-name','card-format'])$(id).addEventListener('change',createCard);
+for(const id of ['card-name','card-format','card-guess'])$(id).addEventListener('change',createCard);
+$('shared-terms').addEventListener('input',()=>{
+  if(!shared||stage!=='result'||scrubPending)return;
+  scrubPending=true;requestAnimationFrame(()=>{
+    scrubPending=false;if(stage!=='result')return;
+    const selected=limitChains(mode,{x:xCoefficients,y:yCoefficients,complex:coefficients},Number($('shared-terms').value));
+    activeX=selected.x;activeY=selected.y;active=selected.complex;
+    const count=mode==='xy'?activeX.length+activeY.length:active.length;$('shared-count').value=`${count} / ${$('shared-terms').max} 个圆`;
+    drawn=0;ink.clearRect(0,0,900,900);drawTrail(resolution);
+  });
+});
 $('save-card').addEventListener('click',()=>{if(cardSurface)download(cardSurface,`fourier-card-${$('card-format').value}.png`);});
 async function copyLink(){
   try{await navigator.clipboard.writeText(cardPayload.url);$('card-status').textContent='分享链接已复制。';}
@@ -371,14 +388,15 @@ function formulas(){if(window.katex)for(const element of document.querySelectorA
 window.addEventListener('load',formulas);
 function loadShared(){
   try{
-    const data=decodePortrait(location.hash);shared=true;sharedName=data.name;document.body.classList.add('shared');$('shared-start').hidden=false;
+    const data=decodePortrait(location.hash);shared=true;sharedName=data.name;sharedGuess=data.guess;document.body.classList.add('shared');$('shared-start').hidden=false;
     ({path,dimensions,mode}=data);picture=sketch=null;isDemo=false;
     coefficients=mode==='complex'?data.chains.complex:dft(path);
     xCoefficients=mode==='xy'?data.chains.x:realDft(path.map(p=>p.x));yCoefficients=mode==='xy'?data.chains.y:realDft(path.map(p=>p.y));
     automaticBounds=null;automatic={complex:{count:coefficients.length,energy:data.energy,error:0},x:{count:xCoefficients.length,energy:data.energy,error:0},y:{count:yCoefficients.length,energy:data.energy,error:0}};
-    scale=590/Math.max(dimensions.width,dimensions.height);$('terms').max=String(Math.max(coefficients.length,xCoefficients.length,yCoefficients.length));
+    scale=350/Math.max(1,...path.map(p=>Math.max(Math.abs(p.x),Math.abs(p.y))));$('terms').max=String(Math.max(coefficients.length,xCoefficients.length,yCoefficients.length));
     for(const button of document.querySelectorAll('[data-mode]'))button.setAttribute('aria-pressed',String(button.dataset.mode===mode));
-    reset();$('heading').textContent=data.name?`${data.name}的星轨，正在相遇。`:'一份来自圆周的肖像。';$('source-label').textContent=data.name||'分享的傅里叶肖像';$('status').textContent='仅由数学系数重建 · 没有原始照片';
+    const count=mode==='xy'?xCoefficients.length+yCoefficients.length:coefficients.length;$('shared-terms').max=String(Math.max(1,count));$('shared-terms').disabled=count<2;
+    reset();$('status').textContent='仅由数学系数重建 · 没有原始照片';
   }catch(error){showError(error.message);loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');}
 }
 if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','示例 / 傅里叶',true,'fourier');requestAnimationFrame(frame);

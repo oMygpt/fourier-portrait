@@ -3,10 +3,53 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {dft,evaluate,orderPath,edgePoints,realDft,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch,vectorize,joinStrokes,resampleClosed,simplify,thin} from './lineart.mjs';
-import {selectTerms,formulaBody,latexDocument} from './portrait.mjs';
+import {selectTerms,formulaBody,latexDocument,limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,bytesToDecimal,decimalToBytes,shareQrSegments,shareQrBits,SHARE_BASE} from './share.mjs';
 import {analyzeSketch} from './path.mjs';
-import {numericExcerpt} from './card.mjs';
+import {numericExcerpt,cardStats,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
+import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
+
+test('gold QR uses flat integer modules and an untextured four-module dark quiet zone',()=>{
+  const qrcode=createRequire(import.meta.url)('./qrcode.js'),qr=qrcode(18,'L');qr.addData('a portrait in circles','Byte');qr.make();
+  const fills=[],ctx={globalAlpha:.2,shadowBlur:8,fillStyle:'red',save(){this.state=[this.globalAlpha,this.shadowBlur,this.fillStyle];},restore(){[this.globalAlpha,this.shadowBlur,this.fillStyle]=this.state;},fillRect(x,y,w,h){fills.push({x,y,w,h,color:this.fillStyle,alpha:this.globalAlpha,blur:this.shadowBlur});}};
+  assert.equal(drawCardQr(ctx,qr,620,996),388);assert.deepEqual(fills[0],{x:620,y:996,w:388,h:388,color:CARD_NIGHT,alpha:1,blur:0});
+  for(const r of fills.slice(1)){assert.equal(r.color,CARD_GOLD);assert.equal(r.alpha,1);assert.equal(r.blur,0);assert.equal(r.w,4);assert.equal(r.h,4);assert.equal(r.x%4,0);assert.equal(r.y%4,0);assert.ok(r.x>=636&&r.y>=1012&&r.x+4<=992&&r.y+4<=1368);}
+  const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
+  assert.ok((luminance(CARD_GOLD)+.05)/(luminance(CARD_NIGHT)+.05)>10);
+  assert.deepEqual([ctx.globalAlpha,ctx.shadowBlur,ctx.fillStyle],[.2,8,'red']);
+  for(const unit of [0,3,4.5])assert.throws(()=>drawCardQr(ctx,qr,620,996,unit),RangeError);
+  assert.throws(()=>drawCardQr(ctx,qr,620.5,996),RangeError);
+  for(const modules of [0,22,93])assert.throws(()=>drawCardQr(ctx,{getModuleCount:()=>modules},620,996),RangeError);
+});
+
+test('personal card stats use the current mode, actual circle count and non-DC dominant frequency',()=>{
+  const chains={x:[{k:0,amplitude:100},{k:-3,amplitude:8}],y:[{k:2,amplitude:5}],complex:[{k:7,amplitude:12}]};
+  assert.deepEqual(cardStats('xy',chains),{count:3,k:-3,radius:100});assert.deepEqual(cardStats('complex',chains),{count:1,k:7,radius:12});
+  assert.deepEqual(cardStats('xy',{x:[],y:[]}),{count:0,k:0,radius:0});
+  for(const amplitude of [NaN,Infinity,-1])assert.throws(()=>cardStats('complex',{complex:[{k:1,amplitude}]}),RangeError);
+});
+
+test('visitor circle budget selects amplitude-ranked terms without mutating the shared portrait',()=>{
+  const chains={x:[{k:1,amplitude:8},{k:2,amplitude:3}],y:[{k:3,amplitude:5}],complex:[{k:4,amplitude:6},{k:5,amplitude:2}]},before=structuredClone(chains);
+  assert.deepEqual(limitChains('xy',chains,2),{x:[chains.x[0]],y:[chains.y[0]],complex:[]});
+  assert.deepEqual(limitChains('xy',chains,100),{x:chains.x,y:chains.y,complex:[]});
+  assert.deepEqual(limitChains('complex',chains,1),{x:[],y:[],complex:[chains.complex[0]]});
+  assert.deepEqual(limitChains('xy',{x:[],y:[]},1),{x:[],y:[],complex:[]});assert.deepEqual(chains,before);
+  for(const count of [0,-1,NaN,Infinity])assert.throws(()=>limitChains('xy',chains,count),RangeError);
+});
+
+test('guessing flag and sanitized name round-trip in both modes, including anonymous and legacy links',()=>{
+  const path=Array.from({length:16},(_,i)=>({x:20*Math.cos(i*Math.PI/8),y:15*Math.sin(i*Math.PI/8),draw:true})),chains={x:realDft(path.map(p=>p.x)),y:realDft(path.map(p=>p.y)),complex:dft(path)};
+  for(const mode of ['xy','complex'])for(const guess of [false,true])for(const name of ['', '小圆<>\n昵称']){
+    const encoded=encodePortrait({mode,chains,path,dimensions:{width:100,height:100},name,guess}),decoded=decodePortrait(encoded.url);
+    assert.equal(decoded.guess,guess);assert.equal(decoded.name,cleanName(name));
+    const wire=decimalToBytes(encoded.url.split('#n')[1]),bytes=inflateSync(wire.subarray(2));
+    assert.equal(bytes[1],2);assert.equal(bytes[24],guess?1:0);
+    bytes[24]=2;const invalid=new Uint8Array([...wire.subarray(0,2),...deflateSync(bytes)]);assert.throws(()=>decodePortrait('#n'+bytesToDecimal(invalid)),/分享链接无效/);
+  }
+  const normal=encodePortrait({mode:'xy',chains,path,dimensions:{width:100,height:100},name:'旧链接'});
+  assert.equal(decodePortrait('#p='+Buffer.from(decimalToBytes(normal.url.split('#n')[1])).toString('base64url')).guess,false);
+});
 
 test('decimal transport preserves every tail length, zero padding and 40-bit blocks',()=>{
   for(const length of [...Array.from({length:32},(_,i)=>i),4096])for(const fill of [0,255,-1]){

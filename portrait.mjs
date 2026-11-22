@@ -18,6 +18,14 @@ export function selectTerms(coefficients, points, scale = 1, axis = '') {
   return {count:coefficients.length,energy:1,error};
 }
 
+export function limitChains(mode,chains,count){
+  if(!Number.isFinite(count)||count<1)throw new RangeError('Invalid circle count');
+  const keys=mode==='xy'?['x','y']:['complex'],selected={x:[],y:[],complex:[]};
+  const terms=keys.flatMap(key=>chains[key].map(c=>({key,c}))).sort((a,b)=>b.c.amplitude-a.c.amplitude);
+  for(const {key,c} of terms.slice(0,Math.floor(count)))selected[key].push(c);
+  return selected;
+}
+
 function number(value) {
   const s=String(Number(value.toPrecision(3)));
   return s.replace(/e([+-]?\d+)/,'\\times 10^{$1}');

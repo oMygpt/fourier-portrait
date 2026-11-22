@@ -1,6 +1,34 @@
 import {evaluate} from './fourier.mjs';
 import {shareQrSegments} from './share.mjs';
 
+export const CARD_GOLD='#edc98a',CARD_NIGHT='#161512';
+
+export function cardStats(mode,chains){
+  const values=mode==='xy'?[...chains.x,...chains.y]:chains.complex;
+  let dominant=null,largest=0;
+  for(const c of values){
+    if(!Number.isFinite(c.k)||!Number.isFinite(c.amplitude)||c.amplitude<0)throw new RangeError('Invalid coefficient');
+    largest=Math.max(largest,c.amplitude);if(c.k&&(!dominant||c.amplitude>dominant.amplitude))dominant=c;
+  }
+  return {count:values.length,k:dominant?.k??0,radius:largest};
+}
+
+export function drawCardQr(ctx,qr,x,y,unit=4){
+  const modules=qr.getModuleCount();
+  if(!Number.isInteger(unit)||unit<4||!Number.isInteger(x)||!Number.isInteger(y))throw new RangeError('二维码必须使用整数像素');
+  if(modules<21||modules>89||(modules-17)%4)throw new RangeError('二维码过密，请缩短分享地址。');
+  const extent=(modules+8)*unit;
+  ctx.save();ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.fillStyle=CARD_NIGHT;ctx.fillRect(x,y,extent,extent);ctx.fillStyle=CARD_GOLD;
+  for(let row=0;row<modules;row++)for(let col=0;col<modules;col++)if(qr.isDark(row,col))ctx.fillRect(x+(col+4)*unit,y+(row+4)*unit,unit,unit);
+  ctx.restore();return extent;
+}
+
+function tracked(ctx,text,x,y,spacing=2,align='left'){
+  const letters=Array.from(text),widths=letters.map(c=>ctx.measureText(c).width),width=widths.reduce((a,b)=>a+b,0)+spacing*Math.max(0,letters.length-1);
+  if(align==='right')x-=width;
+  for(let i=0;i<letters.length;i++){ctx.fillText(letters[i],x,y);x+=widths[i]+spacing;}
+}
+
 export function numericExcerpt(values,real=true){
   const grouped=new Map();
   for(const c of values){
@@ -29,39 +57,48 @@ function equation(ctx,axis,values,x,y,width){
   mathLine(ctx,numeric,x,y+43,width,21);
 }
 
-export function renderSocialCard({mode,chains,path,dimensions,name,energy,shareURL},format='34'){
+export function renderSocialCard({mode,chains,path,name,guess=false,energy,shareURL},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
-  const ctx=card.getContext('2d'),h=card.height;
-  ctx.fillStyle='#161512';ctx.fillRect(0,0,1080,h);
-  const glow=ctx.createRadialGradient(540,h*.36,0,540,h*.36,740);glow.addColorStop(0,'#8056272a');glow.addColorStop(1,'#16151200');ctx.fillStyle=glow;ctx.fillRect(0,0,1080,h);
-  for(let i=0;i<700;i++){ctx.fillStyle=`rgba(224,190,127,${.025+i%4*.009})`;ctx.fillRect(i*173%1080,i*i*137%h,1.5,1.5);}
-  ctx.strokeStyle='#ad8b4b55';ctx.strokeRect(30,30,1020,h-60);
-  ctx.fillStyle='#d9ad69';ctx.font='27px "Noto Serif SC",serif';ctx.fillText('◎  圆周之间',66,76);
-  ctx.textAlign='right';ctx.font='13px sans-serif';ctx.fillStyle='#a59b86';ctx.fillText('A PORTRAIT WRITTEN IN ORBITS',1014,72);
-  ctx.textAlign='center';ctx.fillStyle='#eee1c8';ctx.font='36px "Noto Serif SC",serif';ctx.fillText(name?`${name}的傅里叶公式`:'我的傅里叶公式',540,134);
-  const box={x:90,y:156,w:900,h:format==='916'?1180:810};
-  const scale=Math.min(box.w/dimensions.width,box.h/dimensions.height)*.97,cx=540,cy=box.y+box.h/2;
-  ctx.beginPath();
+  const ctx=card.getContext('2d'),h=card.height,story=format==='916',band=h-444;
+  const box={x:130,y:244,w:820,h:story?1090:690},cy=box.y+box.h/2;
+  ctx.fillStyle=CARD_NIGHT;ctx.fillRect(0,0,1080,h);
+  const glow=ctx.createRadialGradient(540,cy,0,540,cy,650);glow.addColorStop(0,'#80562724');glow.addColorStop(1,'#16151200');ctx.fillStyle=glow;ctx.fillRect(0,0,1080,h);
+  for(let i=0;i<360;i++){const y=i*i*137%h;if(y>band-44)continue;ctx.fillStyle=`rgba(224,190,127,${.025+i%4*.009})`;ctx.fillRect(i*173%1080,y,1,1);}
+  ctx.strokeStyle='#ad8b4b40';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
+  ctx.strokeStyle='#d7b06c88';
+  for(const [x,y,sx,sy] of [[36,36,1,1],[1044,36,-1,1],[36,h-36,1,-1],[1044,h-36,-1,-1]]){ctx.beginPath();ctx.moveTo(x+sx*26,y);ctx.lineTo(x,y);ctx.lineTo(x,y+sy*26);ctx.moveTo(x+sx*8,y+sy*8);ctx.lineTo(x+sx*17,y+sy*8);ctx.moveTo(x+sx*8,y+sy*8);ctx.lineTo(x+sx*8,y+sy*17);ctx.stroke();}
+  ctx.save();ctx.beginPath();ctx.rect(60,236,960,box.h+28);ctx.clip();
+  const radius=story?410:326,vertical=box.h*.47;
+  ctx.strokeStyle='#d7b06c16';
+  for(const padding of [0,34]){ctx.beginPath();ctx.ellipse(540,cy,radius+padding,vertical+padding,0,0,Math.PI*2);ctx.stroke();}
+  for(let i=0;i<48;i++){const a=i*Math.PI/24,len=i%4===0?9:4;ctx.beginPath();ctx.moveTo(540+Math.cos(a)*(radius+34),cy+Math.sin(a)*(vertical+34));ctx.lineTo(540+Math.cos(a)*(radius+34+len),cy+Math.sin(a)*(vertical+34+len));ctx.stroke();}
+  ctx.restore();
+  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=1.3;
+  for(const r of [15,10]){ctx.beginPath();ctx.arc(88,83,r,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle=CARD_GOLD;ctx.font='25px "Noto Serif SC",serif';ctx.fillText('圆周之间',118,87);
+  ctx.fillStyle='#a38c64';ctx.font='9px sans-serif';tracked(ctx,'PORTRAITS IN ORBIT',119,106,2);
+  ctx.font='11px sans-serif';tracked(ctx,guess?'GUESS WHO / 01':'A STUDY OF YOU / 01',1008,84,2,'right');
+  const stats=cardStats(mode,chains),title=`我由 ${stats.count} 个圆组成`;ctx.font='48px "Noto Serif SC",serif';const titleSize=Math.min(48,48*936/Math.max(1,ctx.measureText(title).width));
+  ctx.font=`${titleSize}px "Noto Serif SC",serif`;ctx.fillStyle='#eee1c8';ctx.fillText(title,72,179);
+  ctx.fillStyle='#b4a184';ctx.font='16px "Noto Serif SC",serif';ctx.fillText(`${!guess&&name?`${name} · `:''}主频率 k=${stats.k} · 最大的圆 r=${Number(stats.radius.toPrecision(3))}`,74,216);
+  ctx.save();ctx.translate(1006,cy);ctx.rotate(-Math.PI/2);ctx.fillStyle='#a38c6477';ctx.font='10px sans-serif';tracked(ctx,'EVERY LINE, AN ORBIT',-100,0,2);ctx.restore();
+  const points=[];let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
   for(let i=0;i<=7200;i++){
-    const t=i/7200,p=mode==='xy'?{x:evaluate(chains.x,t).x,y:evaluate(chains.y,t).x}:evaluate(chains.complex,t),x=cx+p.x*scale,y=cy+p.y*scale;
-    const draw=path[Math.min(path.length-1,Math.floor(t*path.length))]?.draw;
-    if(!i||!draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    const t=i/7200,p=mode==='xy'?{x:evaluate(chains.x,t).x,y:evaluate(chains.y,t).x}:evaluate(chains.complex,t);
+    points.push({...p,draw:path[Math.min(path.length-1,Math.floor(t*path.length))]?.draw});minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
   }
-  ctx.strokeStyle='#edc98a';ctx.lineWidth=2.3;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=9;ctx.shadowColor='#d7a25380';ctx.stroke();ctx.shadowBlur=0;
+  const scale=Math.min(box.w/Math.max(1,maxX-minX),box.h/Math.max(1,maxY-minY))*.96,cx=540-(minX+maxX)*scale/2,centerY=cy-(minY+maxY)*scale/2;
+  ctx.save();ctx.beginPath();points.forEach((p,i)=>{const x=cx+p.x*scale,y=centerY+p.y*scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
+  ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=2.2;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=8;ctx.shadowColor='#d7a25370';ctx.stroke();ctx.restore();
+  if(story){ctx.fillStyle='#d3b780';ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'圆周知道答案。你猜呢？':'无数个圆，恰好是你。',72,1400);}
   const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
-  const modules=qr.getModuleCount();if(modules>89)throw Error('二维码过密，请缩短分享地址。');
-  const size=388,unit=4,qx=624,qy=h-456,matrix=document.createElement('canvas');matrix.width=matrix.height=modules+8;
-  const qc=matrix.getContext('2d');qc.fillStyle='#fff';qc.fillRect(0,0,matrix.width,matrix.height);qc.fillStyle='#000';
-  for(let y=0;y<modules;y++)for(let x=0;x<modules;x++)if(qr.isDark(y,x))qc.fillRect(x+4,y+4,1,1);
-  const extent=matrix.width*unit,inset=Math.floor((size-extent)/2);
-  ctx.fillStyle='#fff';ctx.fillRect(qx,qy,size,size);ctx.save();ctx.imageSmoothingEnabled=false;ctx.drawImage(matrix,qx+inset,qy+inset,extent,extent);ctx.restore();
+  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2));
+  ctx.strokeStyle='#ad8b4b55';ctx.beginPath();ctx.moveTo(72,band-28);ctx.lineTo(1008,band-28);ctx.stroke();
+  ctx.fillStyle='#a38c64';ctx.font='11px sans-serif';tracked(ctx,'THE EQUATION /',72,band+23,2);
   const groups=mode==='xy'?[['x',chains.x],['y',chains.y]]:[['z',chains.complex]];
-  ctx.fillStyle='#bca98a';ctx.font='16px sans-serif';ctx.textAlign='left';ctx.fillText(groups.map(([axis,c])=>`${axis.toUpperCase()} ${c.length} 项`).join(' / ')+` · 扫码版保留 ${(energy*100).toFixed(1)}% 能量`,66,qy+20);
-  if(format==='916'){ctx.textAlign='center';ctx.fillStyle='#e1c18a';ctx.font='30px "Noto Serif SC",serif';ctx.fillText('无数个圆，恰好是你。',540,1420);}
-  ctx.strokeStyle='#ad8b4b44';ctx.beginPath();ctx.moveTo(66,qy-15);ctx.lineTo(1014,qy-15);ctx.stroke();
-  ctx.textAlign='left';ctx.fillStyle='#a99a7e';ctx.font='12px sans-serif';ctx.fillText('THE MATHEMATICS OF YOU',66,qy+52);
-  ctx.fillStyle='#e2bf83';groups.forEach(([axis,c],i)=>equation(ctx,axis,c,66,qy+108+i*112,500));
-  ctx.textAlign='center';ctx.font='18px "Noto Serif SC",serif';ctx.fillStyle='#e6c38b';ctx.fillText('扫码，看圆把我画出来',qx+size/2,qy+size+24);
-  ctx.textAlign='left';ctx.font='13px sans-serif';ctx.fillStyle='#948872';ctx.fillText('照片不上传 · 链接仅含数学系数与笔画',66,h-43);
+  ctx.fillStyle=CARD_GOLD;groups.forEach(([axis,c],i)=>equation(ctx,axis,c,72,band+80+i*104,480));
+  ctx.fillStyle='#eee1c8';ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'扫码，看圆画出我是谁':'扫码，看圆把我画出来',72,band+302);
+  ctx.fillStyle='#bca98a';ctx.font='17px sans-serif';ctx.fillText(groups.map(([axis,c])=>`${axis.toUpperCase()} ${c.length} 项`).join(' / ')+` · 扫码保留 ${(energy*100).toFixed(1)}% 能量`,72,band+344);
+  ctx.fillStyle='#a6977d';ctx.font='13px sans-serif';ctx.fillText('照片不上传 · 链接仅含数学系数与笔画',72,h-58);
   return {canvas:card,qrVersion:(modules-17)/4};
 }
