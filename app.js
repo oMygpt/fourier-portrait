@@ -9,6 +9,7 @@ import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
 import {featureRegions} from './portrait-preprocess.mjs';
+import {tintSketch,sketchReveal,sketchBlend,drawSketch} from './sketch.mjs';
 
 const $ = id => document.getElementById(id);
 let palette='ink';
@@ -27,6 +28,18 @@ const samples = [
   ['euler','欧拉','Leonhard_Euler.jpg'],['gauss','高斯','Carl_Friedrich_Gauss_1840_by_Jensen.jpg'],
 ];
 let coefficients = [], active = [], path = [], picture = null, sketch = null;
+let tinted=null,tintedPalette='',resultView='overlay';
+let sketchPending=false,sketchArrived=0,installedGeneration=0,lateSketch=null;
+function sketchSurface(){if(sketch&&(!tinted||tintedPalette!==palette)){tinted=tintSketch(sketch,palette);tintedPalette=palette;}return tinted;}
+function acceptSketch(data,token){
+  if(token!==generation)return;
+  lateSketch=data;if(installedGeneration!==token)return;
+  sketchPending=false;$('download-sketch').disabled=false;
+  if(data.sketch){sketch=graySurface(data.sketch);tinted=null;sketchArrived=performance.now();}
+  $('status').textContent=$('status').textContent.replace(' · 素描正在落纸…','')+(data.sketch?' · U²-Net 人像素描':' · 素描暂不可用，已保留轮廓');
+  $('lens-note').textContent=data.sketch?'光影落纸，每一笔都是圆的回声':'素描暂不可用，圆周轮廓已保留';
+  if($('card-dialog').open)createCard();
+}
 let xCoefficients = [], yCoefficients = [], activeX = [], activeY = [];
 let mode = 'xy', plot = {x:450,y:450,scale:1}, topChain = {x:450,y:150}, leftChain = {x:150,y:450};
 let automatic = null, manual = false;
@@ -49,10 +62,12 @@ function setView(next) {
 function setStage(next) {
   stage = next; stageTime = 0; document.body.dataset.stage = next;
   $('personal-formula').hidden=next!=='result';
+  $('result-views').hidden=next!=='result'||shared;
+  if(next==='result'&&!shared){plot={x:450,y:450,scale};ink.clearRect(0,0,900,900);drawn=0;drawTrail(resolution);setResultView('overlay');}
   if(next==='result')previewFormula();
   for (const [id, on] of [['step-sketch',next==='sketch'],['step-draw',next==='reveal'||next==='drawing'],['step-result',next==='result']]) $(id).classList.toggle('active',on);
   const content = {
-    sketch:['01 / THE IMAGE BECOMES INK','褪去明暗，<br><em>留下你的线条。</em>','先让照片成为一幅黑白线条画。<br>光与影之间，藏着轮廓的起点。','照片 → 线条画'],
+    sketch:['01 / THE IMAGE BECOMES INK','光影落纸，<br><em>留下你的神态。</em>','发丝与明暗，由素描留住。<br>轮廓交给圆周，再慢慢画一遍。','照片 → 人像素描'],
     reveal:['02 / THE ORBITS AWAKEN','每一条线，<br><em>都有回响。</em>','笔画化作复数，圆周渐渐苏醒。<br>下一刻，它们将为你重新相遇。','沿笔画采样 · 圆周即将苏醒'],
     drawing:['02 / THE ORBITS AWAKEN','让时间，<br><em>慢慢画出你。</em>','大圆勾勒轮廓，小圆拾起细节。<br>沿着光点，看简单如何叠加成复杂。','旋转的尽头，是你的轮廓'],
     result:['03 / A MOMENT, PRESERVED','此刻，<br><em>留在圆周之间。</em>','无数个圆，终于相遇成一个你。<br>把这一刻带走，或再看星轨走过一遍。','每一笔，都是圆的回声'],
@@ -67,7 +82,8 @@ function setStage(next) {
   }
   if(shared&&next==='result'){
     plot={x:450,y:450,scale};drawSharedPortrait();
-    $('story').textContent='这是由数学系数重建的肖像。你的照片，也有自己的星轨。';
+    $('lens-note').textContent='完整素描保存在 TA 的卡片里';
+    $('story').textContent='这是由数学系数重建的肖像。完整素描保存在 TA 的卡片里。';
   }
   if(next==='sketch') setView('sketch');
   if(next==='reveal'||next==='drawing'||next==='result') setView('fourier');
@@ -112,12 +128,13 @@ function pen(t) {
 
 function install(result, image, name, demo) {
   cropping=false;cropStart=cropEnd=null;canvas.classList.remove('cropping');
-  ({path,sketch,dimensions,strokeCount}=result); picture=image;sourceName=name;isDemo=demo;
+  ({path,sketch,dimensions,strokeCount}=result);tinted=null;picture=image;sourceName=name;isDemo=demo;
   coefficients=result.coefficients;$('terms').max=String(coefficients.length);
   xCoefficients=result.x;yCoefficients=result.y;
   scale=590/Math.max(dimensions.width,dimensions.height);
   automatic=result.automatic;automaticBounds=result.bounds;manual=false;
-  reset(!demo);$('source-label').textContent=name;
+  sketchPending=Boolean(result.sketchPending);sketchArrived=0;$('download-sketch').disabled=sketchPending;
+  reset(!demo&&!sketchPending);$('source-label').textContent=name;
   $('status').textContent=demo ? '示例 / 傅里叶 · 由他的圆，画出他本人' : `${strokeCount} 条笔画 · ${path.length} 个等距采样点 · 全程本地`;
 }
 
@@ -126,7 +143,7 @@ async function prepare(image,sampleId,token) {
   const work=document.createElement('canvas'), ratio=Math.min(1,400/Math.max(image.naturalWidth,image.naturalHeight));
   work.width=Math.max(4,Math.round(image.naturalWidth*ratio));work.height=Math.max(4,Math.round(image.naturalHeight*ratio));
   const wc=work.getContext('2d',{willReadFrequently:true});wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.drawImage(image,0,0,work.width,work.height);
-  let binary,renderer='XDoG',fallback=false,face=null,landmarks=[];
+  let binary,renderer='XDoG',fallback=false,face=null,landmarks=[],displaySketch=null,sketchFallback=false,sketchPending=false;
   if(style!=='classic')try{
     let gray;
     if(sampleId){
@@ -138,18 +155,25 @@ async function prepare(image,sampleId,token) {
       renderer=style==='anime'?'预绘素描线稿':'预绘清晰轮廓';
     }else{
       if(token===generation)$('use-classic').hidden=false;
-      const result=await modelLineArt(image,style,progress=>{if(token===generation)$('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);});
+      const result=await modelLineArt(image,style,progress=>{if(token!==generation)return;if(progress.sketchProgress){if(installedGeneration===token&&sketchPending)$('lens-note').textContent=progress.message||`素描模型正在落纸… ${progress.progress}%`;}else $('status').textContent=progress.message||(progress.inference?'模型正在静静描线…':`正在准备${progress.model||'描线模型'}… ${progress.progress}%${progress.cached?' · 已缓存':''}`);},data=>acceptSketch(data,token));
       if(token===generation)$('use-classic').hidden=true;
       gray=result.gray;face=result.face;landmarks=result.landmarks;work.width=result.width;work.height=result.height;renderer=style==='anime'?'AI 素描线稿':'AI 清晰轮廓';
+      sketchPending=result.sketchPending;displaySketch=graySurface({gray,width:result.width,height:result.height});
     }
     binary=thresholdSketch(gray,work.width,work.height,Number($('detail').value),Number($('style').value),featureRegions(landmarks,face));
   }catch{fallback=true;renderer='XDoG';}
+  if(sampleId)try{const image=new Image();image.src=`samples/${sampleId}-u2.png`;await image.decode();displaySketch=document.createElement('canvas');displaySketch.width=image.naturalWidth;displaySketch.height=image.naturalHeight;displaySketch.getContext('2d').drawImage(image,0,0);}catch{sketchFallback=true;}
   if(!binary)binary=xdog(wc.getImageData(0,0,work.width,work.height).data,work.width,work.height,styleParameters(Number($('style').value),Number($('detail').value)));
   const minLength=(renderer==='XDoG'?8:18)-Number($('detail').value)*(renderer==='XDoG'?.08:.16);
   const analysis=await analyze(binary,work.width,work.height,minLength,renderer!=='XDoG',face,landmarks),{strokes}=analysis;
   wc.fillStyle='#fff';wc.fillRect(0,0,work.width,work.height);wc.strokeStyle='#161512';wc.lineWidth=1.15;wc.lineJoin='round';wc.lineCap='round';
   for(const stroke of strokes){wc.beginPath();wc.moveTo(stroke[0].x,stroke[0].y);for(const p of stroke.slice(1))wc.lineTo(p.x,p.y);wc.stroke();}
-  return {...analysis,sketch:work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,elapsed:Math.round(performance.now()-started)};
+  return {...analysis,sketch:displaySketch||work,dimensions:{width:work.width,height:work.height},strokeCount:strokes.length,renderer,fallback,sketchFallback,sketchPending,elapsed:Math.round(performance.now()-started)};
+}
+
+function graySurface({gray,width,height}){
+  const surface=document.createElement('canvas');surface.width=width;surface.height=height;const context=surface.getContext('2d'),pixels=context.createImageData(width,height);
+  for(let i=0;i<gray.length;i++){pixels.data[i*4]=pixels.data[i*4+1]=pixels.data[i*4+2]=gray[i];pixels.data[i*4+3]=255;}context.putImageData(pixels,0,0);return surface;
 }
 
 function analyze(binary,width,height,minLength,portrait,face,landmarks){
@@ -180,7 +204,7 @@ async function focusStage(token) {
 }
 
 async function loadImage(source,name,demo=false,sampleId='') {
-  const token=++generation;busy=true;$('error').hidden=true;$('status').textContent='正在本地将照片化作线条…';
+  const token=++generation;cancelLineArt(true);lateSketch=null;busy=true;$('error').hidden=true;$('status').textContent='正在本地将照片化作线条…';
   try {
     const image=source instanceof HTMLImageElement?source:new Image();
     if(typeof source==='string'){image.src=source;await image.decode();}
@@ -189,7 +213,13 @@ async function loadImage(source,name,demo=false,sampleId='') {
     currentSampleId=sampleId;
     install(result,image,name,demo);
     $('status').textContent+=` · ${result.renderer} · ${result.elapsed}ms`;
+    installedGeneration=token;
+    if(result.sketchPending)$('status').textContent+=' · 素描正在落纸…';
+    else if(!result.fallback&&!result.sketchFallback&&(sampleId||$('model-style').value!=='classic'))$('status').textContent+=' · U²-Net 人像素描';
+    if(lateSketch)acceptSketch(lateSketch,token);
+    busy=false;
     if(result.fallback)$('status').textContent+=' · 模型暂未就绪，已切换经典算法';
+    else if(result.sketchFallback)$('status').textContent+=' · 素描暂不可用，已保留轮廓';
     for(const button of document.querySelectorAll('[data-sample]'))button.setAttribute('aria-pressed',String(button.dataset.sample===sampleId));
     if(!demo)await focusStage(token);
   } catch(error) {
@@ -235,6 +265,8 @@ $('play').addEventListener('click',()=>{playing=!playing;$('play').textContent=p
 $('replay').addEventListener('click',()=>{isDemo=false;reset();});
 $('skip').addEventListener('click',()=>{time=1;drawTrail(resolution);setStage('result');});
 for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>setView(button.dataset.view));
+function setResultView(value){resultView=value;for(const button of document.querySelectorAll('[data-result-view]'))button.setAttribute('aria-pressed',String(button.dataset.resultView===value));}
+for(const button of document.querySelectorAll('[data-result-view]'))button.addEventListener('click',()=>{setResultView(button.dataset.resultView);setView('fourier');});
 $('formula-link').addEventListener('click',()=>{$('formula-details').open=true;});
 $('credits-link').addEventListener('click',()=>{$('sample-credits').open=true;});
 $('crop').addEventListener('click',()=>{
@@ -271,12 +303,13 @@ function previewFormula(){
 async function createCard(){
   const token=++cardGeneration;$('card-status').textContent='正在点亮你的分享卡片…';
   for(const id of ['save-card','system-share','copy-link'])$(id).disabled=true;
+  if(sketchPending){$('card-status').textContent='圆周已就绪，素描仍在落纸；完成后会自动生成卡片。';$('card-preview').removeAttribute('src');$('share-url').value='';cardSurface=cardPayload=null;return;}
   try{
     await document.fonts.ready;await Promise.all(['24px KaTeX_Main','italic 24px KaTeX_Math','36px KaTeX_Size2'].map(font=>document.fonts.load(font)));await new Promise(resolve=>requestAnimationFrame(resolve));
     if(token!==cardGeneration)return;
     const snapshot={mode,chains:currentChains(),path,dimensions,name:cleanName($('card-name').value),guess:$('card-guess').checked,palette};
     const payload=encodePortrait(snapshot,SHARE_BASE);
-    const card=renderSocialCard({...snapshot,energy:payload.energy,shareURL:payload.url},$('card-format').value);
+    const card=renderSocialCard({...snapshot,sketch:sketchSurface(),energy:payload.energy,shareURL:payload.url},$('card-format').value);
     cardSurface=card.canvas;cardPayload=payload;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
     $('card-status').textContent=`${payload.url.length} 字符 · QR v${card.qrVersion} · 分享 ${payload.terms.filter(Boolean).join(' / ')} 项 · 保留 ${(payload.energy*100).toFixed(1)}% 能量`;
     for(const id of ['save-card','system-share','copy-link'])$(id).disabled=false;
@@ -320,10 +353,16 @@ $('copy-formula').addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(formulaBody(mode,currentChains()));$('formula-status').textContent='公式已复制。';}
   catch{$('formula-status').textContent='无法访问剪贴板，请保存 LaTeX 文件。';}
 });
-$('download-sketch').addEventListener('click',()=>{if(sketch)download(sketch,'fourier-lineart.png');});
+$('download-sketch').addEventListener('click',()=>{if(sketch&&!sketchPending){const surface=sketchSurface(),output=document.createElement('canvas');output.width=surface.width;output.height=surface.height;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,output.width,output.height);drawSketch(out,surface,0,0,output.width,output.height,palette);download(output,'portrait-sketch.png');}});
 $('download').addEventListener('click',()=>{
-  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);out.drawImage(trail,0,0,900,900);download(output,'fourier-portrait.png');
+  const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);drawComposition(out,shared?'lines':resultView,1,true);download(output,'fourier-portrait.png');
 });
+
+function drawComposition(context,kind,progress,complete=false){
+  const visible=sketch&&!sketchPending,arrival=sketchArrived&&!reduced.matches&&!complete?Math.min(1,(performance.now()-sketchArrived)/1200):1;
+  if(visible&&kind!=='lines'){context.globalAlpha=sketchReveal(progress)*arrival;const w=dimensions.width*plot.scale,h=dimensions.height*plot.scale;drawSketch(context,sketchSurface(),plot.x-w/2,plot.y-h/2,w,h,palette);}
+  if(kind!=='sketch'||!visible){context.globalAlpha=visible&&kind==='overlay'?1-.82*arrival:1;context.drawImage(trail,0,0,900,900);}context.globalAlpha=1;
+}
 
 function drawSharedPortrait(){
   const count=Math.max(7200,Math.ceil(canvas.width*8/path.length)*path.length);
@@ -383,7 +422,7 @@ function render() {
     if(cropping){ctx.strokeStyle=colors().accent;ctx.lineWidth=2;ctx.setLineDash([8,5]);const frame=photoFrame(),a=cropStart||{x:450-frame.width/2,y:450-frame.height/2},b=cropEnd||{x:450+frame.width/2,y:450+frame.height/2};ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);ctx.setLineDash([]);}
     return;
   }
-  if(view==='sketch'&&sketch){drawSurface(sketch);if(stage==='sketch'&&stageTime<1.6&&!reduced.matches)drawSurface(picture,Math.max(0,1-stageTime/1.6));return;}
+  if(view==='sketch'&&sketch){ctx.save();ctx.globalCompositeOperation=sketchBlend(palette);drawSurface(sketchSurface());ctx.restore();if(stage==='sketch'&&stageTime<1.6&&!reduced.matches)drawSurface(picture,Math.max(0,1-stageTime/1.6));return;}
   if(stage==='reveal'){
     ctx.fillStyle=colors().line;const count=Math.floor(path.length*Math.min(1,stageTime/1.3));
     for(let i=0;i<count;i+=2){const p=path[i];if(!p.draw)continue;ctx.globalAlpha=.55;ctx.beginPath();ctx.arc(plot.x+p.x*plot.scale,plot.y+p.y*plot.scale,1.25,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;return;
@@ -393,9 +432,8 @@ function render() {
     ctx.globalAlpha=.15;ctx.strokeStyle=colors().line;ctx.lineWidth=1;ctx.beginPath();
     for(let i=0;i<path.length;i++){const p=path[i],x=plot.x+p.x*plot.scale,y=plot.y+p.y*plot.scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.stroke();ctx.globalAlpha=1;
   }
-  ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio,palette).glow):reduced.matches?0:colors().glow;ctx.shadowColor=drawingInk().shadow;ctx.drawImage(trail,0,0,900,900);ctx.shadowBlur=0;
-  if(shared&&stage==='result')return;
-  if(stage==='result')ctx.globalAlpha=.8;
+  ctx.shadowBlur=shared?(stage==='result'?0:visitorInk(sharedWidth,surfaceRatio,palette).glow):reduced.matches?0:colors().glow;ctx.shadowColor=drawingInk().shadow;drawComposition(ctx,shared?'lines':stage==='result'?resultView:'overlay',stage==='result'?1:time);ctx.shadowBlur=0;
+  if(stage==='result')return;
   let tip;
   if(mode==='xy'){
     const X=drawChain(activeX,topChain,0,2),Y=drawChain(activeY,leftChain,Math.PI/2,2);

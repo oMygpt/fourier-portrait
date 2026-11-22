@@ -6,11 +6,11 @@ let session=null,currentStyle='';
 
 async function modelBytes(file,id){
   const url=new URL(`models/${file}`,self.location.href).href;
-  const model=file==='yunet.onnx'?'人像识别模型':file==='modnet-q8.onnx'?'背景分离模型':'描线模型',notify=data=>postMessage({id,model,...data});
+  const model=file==='yunet.onnx'?'人像识别模型':file==='modnet-q8.onnx'?'背景分离模型':file==='u2net-portrait-q8.onnx'?'人像素描模型':'描线模型',notify=data=>postMessage({id,model,...data});
   let cache;
   try{cache=await caches.open('fourier-lineart-v1');const saved=await cache.match(url);if(saved){notify({progress:100,cached:true});return saved.arrayBuffer();}}catch{}
   const response=await fetch(url);if(!response.ok)throw Error('Model download failed');
-  const total=Number(response.headers.get('content-length'))||17500000,reader=response.body.getReader(),chunks=[];let received=0;
+  const total=Number(response.headers.get('content-length'))||(file==='u2net-portrait-q8.onnx'?44233106:17500000),reader=response.body.getReader(),chunks=[];let received=0;
   while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:Math.min(99,Math.round(received/total*100))});}
   const bytes=new Uint8Array(received);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   try{await cache?.put(url,new Response(bytes,{headers:{'content-type':'application/octet-stream'}}));}catch{}
@@ -35,7 +35,7 @@ async function run({data:{id,bitmap,style}}){
     const side=512,canvas=new OffscreenCanvas(side,side),ctx=canvas.getContext('2d',{willReadFrequently:true});
     const ratio=side/Math.max(source.width,source.height),w=Math.round(source.width*ratio),h=Math.round(source.height*ratio),x=Math.floor((side-w)/2),y=Math.floor((side-h)/2);
     ctx.fillStyle='#fff';ctx.fillRect(0,0,side,side);ctx.drawImage(source,x,y,w,h);
-    const width=Math.max(4,Math.round(source.width*Math.min(1,400/Math.max(source.width,source.height)))),height=Math.max(4,Math.round(source.height*Math.min(1,400/Math.max(source.width,source.height))));bitmap.close();
+    const width=Math.max(4,Math.round(source.width*Math.min(1,400/Math.max(source.width,source.height)))),height=Math.max(4,Math.round(source.height*Math.min(1,400/Math.max(source.width,source.height))));
     const rgba=ctx.getImageData(0,0,side,side).data,input=new Float32Array(side*side*3);
     for(let i=0;i<side*side;i++)for(let c=0;c<3;c++)input[c*side*side+i]=rgba[i*4+c]/255;
     const tensor=new ort.Tensor('float32',input,[1,3,side,side]),output=await session.run({[session.inputNames[0]]:tensor}),result=output[session.outputNames[0]],pixels=ctx.createImageData(side,side);
@@ -43,7 +43,14 @@ async function run({data:{id,bitmap,style}}){
     tensor.dispose();for(const value of Object.values(output))value.dispose();ctx.putImageData(pixels,0,0);
     const cropped=new OffscreenCanvas(width,height),cc=cropped.getContext('2d',{willReadFrequently:true});cc.drawImage(canvas,x,y,w,h,0,0,width,height);
     const image=cc.getImageData(0,0,width,height).data,gray=new Uint8Array(width*height);for(let i=0;i<gray.length;i++)gray[i]=image[i*4];
-    postMessage({id,gray,width,height,face:portrait.face,landmarks:portrait.landmarks||[],enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed,strategy:portrait.strategy||'original'},[gray.buffer]);
+    postMessage({id,gray,width,height,sketchPending:true,face:portrait.face,landmarks:portrait.landmarks||[],enhanced:portrait.enhanced,mattingUsed:portrait.mattingUsed,strategy:portrait.strategy||'original'},[gray.buffer]);
+    try{
+      const {portraitSketch}=await import('./sketch-worker.mjs');let matte=portrait.sketchMatte;
+      if(!matte)try{const {portraitMatte}=await import('./portrait-worker.mjs');matte=await portraitMatte(source,ort,file=>modelBytes(file,id));}catch{}
+      const sketch=await portraitSketch(source,ort,file=>modelBytes(file,id),message=>postMessage({id,message,sketchProgress:true}),matte);
+      postMessage({id,sketch},[sketch.gray.buffer]);
+    }catch{postMessage({id,sketchFallback:true});}
+    bitmap.close();
   }catch(error){bitmap?.close();postMessage({id,error:error.message||'Model inference failed'});}
 }
 let queue=Promise.resolve();

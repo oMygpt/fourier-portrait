@@ -1,4 +1,5 @@
 import {evaluate} from './fourier.mjs';
+import {drawSketch} from './sketch.mjs';
 import {shareQrSegments} from './share.mjs';
 import {PORTRAIT_INK} from './portrait-render.mjs';
 import {getPalette} from './palettes.mjs';
@@ -60,7 +61,7 @@ function equation(ctx,axis,values,x,y,width){
   mathLine(ctx,numeric,x,y+43,width,21);
 }
 
-export function renderSocialCard({mode,chains,path,name,guess=false,energy,shareURL,palette='ink'},format='34'){
+export function renderSocialCard({mode,chains,path,sketch=null,name,guess=false,energy,shareURL,palette='ink'},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
   const ctx=card.getContext('2d'),h=card.height,story=format==='916',band=h-444;
   const colors=getPalette(palette),CARD_GOLD=colors.line,CARD_NIGHT=colors.background;
@@ -92,8 +93,11 @@ export function renderSocialCard({mode,chains,path,name,guess=false,energy,share
     points.push({...p,draw:path[Math.min(path.length-1,Math.floor(t*path.length))]?.draw});minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
   }
   const scale=Math.min(box.w/Math.max(1,maxX-minX),box.h/Math.max(1,maxY-minY))*.96,cx=540-(minX+maxX)*scale/2,centerY=cy-(minY+maxY)*scale/2;
+  if(sketch){const factor=Math.min(box.w/sketch.width,box.h/sketch.height)*.96,w=sketch.width*factor,h=sketch.height*factor;drawSketch(ctx,sketch,540-w/2,cy-h/2,w,h,palette);}
+  else{
   ctx.save();ctx.beginPath();points.forEach((p,i)=>{const x=cx+p.x*scale,y=centerY+p.y*scale;if(!i||!p.draw)ctx.moveTo(x,y);else ctx.lineTo(x,y);});
   ctx.strokeStyle=CARD_GOLD;ctx.lineWidth=PORTRAIT_INK.width;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowBlur=colors.glow;ctx.shadowColor=colors.shadow;ctx.stroke();ctx.restore();
+  }
   if(story){ctx.fillStyle=colors.muted;ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'圆周知道答案。你猜呢？':'无数个圆，恰好是你。',72,1400);}
   const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
   const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2),4,palette);
@@ -103,6 +107,6 @@ export function renderSocialCard({mode,chains,path,name,guess=false,energy,share
   ctx.fillStyle=CARD_GOLD;groups.forEach(([axis,c],i)=>equation(ctx,axis,c,72,band+80+i*104,480));
   ctx.fillStyle=colors.text;ctx.font='27px "Noto Serif SC",serif';ctx.fillText(guess?'扫码，看圆画出我是谁':'扫码，看圆把我画出来',72,band+302);
   ctx.fillStyle=colors.muted;ctx.font='17px sans-serif';ctx.fillText(groups.map(([axis,c])=>`${axis.toUpperCase()} ${c.length} 项`).join(' / ')+` · 扫码保留 ${(energy*100).toFixed(1)}% 能量`,72,band+344);
-  ctx.fillStyle=colors.muted;ctx.font='13px sans-serif';ctx.fillText('照片不上传 · 链接仅含数学系数与笔画',72,h-58);
+  ctx.fillStyle=colors.muted;ctx.font='13px sans-serif';ctx.fillText('照片不上传 · 素描留在卡片 · 扫码重建圆周轮廓',72,h-58);
   return {canvas:card,qrVersion:(modules-17)/4};
 }
