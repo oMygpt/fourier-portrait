@@ -1,2 +1,50 @@
-# fourier-portrait
-上传 JPG 肖像，用傅里叶级数（旋转圆）画出你的轮廓 / Draw your portrait with Fourier epicycles
+# 圆周之间 · Fourier Portrait
+
+无需构建、完全在浏览器内运行的傅里叶人像绘图工具。中文界面，支持手机。
+
+## 使用
+
+在本目录执行 `python3 -m http.server 8080`，访问 http://localhost:8080 。因为使用 ES 模块，请通过 HTTP 打开，而非双击 HTML 文件。
+
+1. 默认播放内置线条肖像，也可选择本地 JPG / PNG 照片。
+2. 拖动「轮廓细节」并松开以重新提取边缘；高数值降低 Sobel 阈值，保留更多细节。
+3. 调整圆数量可从头重绘；调整速度不改变轨迹，可暂停/继续。每轮绘制完成后停留，调整圆数量即可重播。
+4. 可切换旋转圆或淡淡的原图，点击「保存 PNG」导出当前已绘制线条（不含原图、网格、辅助圆）。
+
+建议使用背景简洁、对比清晰的肖像。无边缘或损坏图片会显示中文提示。非常大的图片解码仍可能受设备内存限制。
+
+## 数学与处理流程
+
+最长边缩小至 360 像素 → 亮度灰度化 → 3×3 高斯模糊 → Sobel 梯度与阈值 → 均匀抽取最多 1800 个边缘点 → 贪心最近邻排序 → 闭合路径 → DFT。
+
+把轮廓点视作复数：
+
+$$z_n=x_n+i y_n$$
+
+离散傅里叶系数：
+
+$$c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N},\quad k=-\lfloor N/2\rfloor,\ldots,\lceil N/2\rceil-1$$
+
+按系数幅值降序排列，选前 M 项（集合记作 K_M）：
+
+$$z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt},\quad t\in[0,1]$$
+
+其中 $|c_k|$ 是圆半径，$\arg(c_k)$ 是初始相位，$k$ 为旋转频率，正负表示相反方向。零频项对应整体位置。保留越多项，越接近原始采样轮廓。页面用 KaTeX 渲染公式，无网络时仍显示文字公式。
+
+这是单路径近似，并非语义人脸识别；断开的轮廓之间会出现连接线。最近邻排序和直接 DFT 都为 O(N²)，因此限制采样数量。图像坐标 y 轴向下，与教科书复平面的视觉旋转方向相反，但公式一致。
+
+## 隐私
+
+图片通过 File API 读取、Canvas 本地处理，不发送到服务器，不写入持久存储。无分析统计。KaTeX 从 jsDelivr 加载，字体从 Google Fonts 加载；这些第三方仅接收普通资源请求，不接收照片。断网时使用系统字体与文字公式，绘图功能不依赖 CDN。
+
+## GitHub Pages 部署
+
+把此目录文件推送到 GitHub 仓库的 `main` 分支根目录。在仓库 **Settings → Pages → Build and deployment** 中选择 **Deploy from a branch → main → / (root)** 并保存。无需 npm、构建命令或 Actions 工作流。`.nojekyll` 禁止 Jekyll 处理，所有资源使用相对路径，兼容项目子路径。
+
+## 检查
+
+算法测试：`node --test fourier.test.mjs`。浏览器检查需另行验证图片上传、动画与下载。运行时不需要 Node 或任何包。
+
+## 许可
+
+MIT，见 [LICENSE](LICENSE)。

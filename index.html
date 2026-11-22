@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="在浏览器里，用傅里叶级数和旋转的圆重新描绘你的照片。照片只在本地处理。">
+  <title>圆周之间 · 傅里叶人像</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header><a class="brand" href="./"><span class="brand-icon">◎</span> 圆周之间 <span class="brand-en">FOURIER PORTRAIT</span></a><span class="privacy"><i></i> 本地计算，照片不上传</span></header>
+  <main>
+    <section class="intro"><div class="eyebrow">A LITTLE MATH. A DIFFERENT PORTRAIT.</div><h1>让旋转的圆，<em>画出你。</em></h1><p>一张照片，无数个圆。把轮廓交给傅里叶级数，看它一笔一笔重新生长。</p></section>
+    <section class="studio" aria-label="傅里叶绘图工作台">
+      <div class="stage-wrap"><div class="stage-top"><span><i class="live-dot"></i> 傅里叶画布</span><span id="source-label">内置示例 · 线条肖像</span></div><canvas id="canvas" width="900" height="760" aria-label="旋转圆与人像轨迹"></canvas><div class="stage-bottom"><span id="status" role="status" aria-live="polite">准备示例…</span><span id="progress">0%</span></div></div>
+      <aside>
+        <div class="section-label">01 / 选择你的画面</div><label class="upload" for="upload"><span class="upload-icon">↥</span><strong>上传一张照片</strong><span>JPG / PNG · 建议使用清晰、简洁的肖像</span><input id="upload" type="file" accept="image/jpeg,image/png"></label><button id="demo" class="text-button">或试试内置线条肖像 ↗</button>
+        <div class="divider"></div><div class="section-label">02 / 调整绘画方式</div>
+        <label class="control" for="detail"><span>轮廓细节 <output id="detail-value">50</output></span><input id="detail" type="range" min="0" max="100" value="50"><small>更高细节会保留更多边缘，也可能带来噪点</small></label>
+        <label class="control" for="terms"><span>旋转圆数量 <output id="terms-value">160</output></span><input id="terms" type="range" min="1" max="600" value="160"><small>从寥寥几笔，到细腻轮廓</small></label>
+        <label class="control" for="speed"><span>绘制速度 <output id="speed-value">1.0×</output></span><input id="speed" type="range" min="0.2" max="3" step="0.1" value="1"></label>
+        <label class="toggle"><span>叠加原始照片</span><input id="original" type="checkbox" role="switch"></label>
+        <label class="toggle"><span>显示旋转圆</span><input id="circles" type="checkbox" role="switch" checked></label>
+        <div class="actions"><button id="play" class="primary">Ⅱ 暂停</button><button id="download" class="secondary">↓ 保存 PNG</button></div><p class="local-note">只保存绘制线条，不含原图与辅助圆。</p>
+      </aside>
+    </section>
+    <section class="math-section"><div class="math-heading"><div><div class="eyebrow">BEHIND THE CIRCLES</div><h2>不是魔法，是傅里叶。</h2></div><p>复杂的轮廓，也可以是简单旋转的叠加。<br>Fourier series, one circle at a time.</p></div>
+      <div class="math-grid"><article><span class="step">01 — 轮廓变成数字</span><h3>把平面，当作复平面</h3><p>缩小照片、灰度化、模糊并提取边缘，再将采样点按邻近顺序连成一条闭合路径。横坐标是实部，纵坐标是虚部。</p><div class="formula" data-tex="z_n=x_n+i y_n">zₙ = xₙ + i yₙ</div></article><article><span class="step">02 — 找到每一个圆</span><h3>用 DFT 拆解轮廓</h3><p>离散傅里叶变换为每个频率计算一个复系数。这些系数，记录了每个圆的大小和起点。</p><div class="formula" data-tex="c_k=\frac{1}{N}\sum_{n=0}^{N-1}z_n e^{-2\pi i kn/N}">cₖ = (1/N) Σ zₙ e^(−2πikn/N)</div></article><article><span class="step">03 — 让圆转起来</span><h3>叠加旋转，重现线条</h3><p>按系数幅值由大到小选择 M 项。圆首尾相连，末端的轨迹就是重建的轮廓；圆越多，细节越完整。</p><div class="formula" data-tex="z(t)\approx\sum_{k\in K_M}c_k e^{2\pi i kt}">z(t) ≈ Σ cₖ e^(2πikt)</div></article></div>
+      <div class="legend"><span><b>|cₖ|</b> 圆的半径</span><span><b>arg(cₖ)</b> 初始相位</span><span><b>k</b> 旋转频率（正负代表方向）</span><span><b>t ∈ [0, 1]</b> 一次完整绘制</span></div><p class="caveat">小提示：多个分离的边缘会被连线串起，这是单条闭合路径的近似。背景越简洁，肖像越清楚。</p>
+    </section>
+  </main><footer><span>圆周之间 / FOURIER PORTRAIT</span><span>为好奇心而作 · 在你的浏览器中运行</span></footer>
+</body></html>
