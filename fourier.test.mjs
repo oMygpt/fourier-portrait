@@ -120,7 +120,8 @@ test('palette QR uses flat integer modules and an untextured four-module quiet z
   assert.deepEqual([ctx.globalAlpha,ctx.shadowBlur,ctx.fillStyle],[.2,8,'red']);
   for(const unit of [0,3,4.5])assert.throws(()=>drawCardQr(ctx,qr,620,996,unit),RangeError);
   assert.throws(()=>drawCardQr(ctx,qr,620.5,996),RangeError);
-  for(const modules of [0,22,93])assert.throws(()=>drawCardQr(ctx,{getModuleCount:()=>modules},620,996),RangeError);
+  for(const modules of [93,97,105])assert.equal(drawCardQr(ctx,{getModuleCount:()=>modules,isDark:()=>false},0,0),(modules+8)*4);
+  for(const modules of [0,22,109])assert.throws(()=>drawCardQr(ctx,{getModuleCount:()=>modules},620,996),RangeError);
 });
 
 test('formula cards use real terms, localized copy and no private portrait',()=>{

@@ -8,7 +8,7 @@ export const CARD_GOLD=getPalette('ink').line,CARD_NIGHT=getPalette('ink').backg
 export function drawCardQr(ctx,qr,x,y,unit=4,palette='ink'){
   const modules=qr.getModuleCount();
   if(!Number.isInteger(unit)||unit<4||!Number.isInteger(x)||!Number.isInteger(y))throw new RangeError('QR modules require integer pixels');
-  if(modules<21||modules>89||(modules-17)%4)throw new RangeError('QR is too dense');
+  if(modules<21||modules>105||(modules-17)%4)throw new RangeError('QR is too dense');
   const extent=(modules+8)*unit,colors=getPalette(palette);
   ctx.save();ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.fillStyle=colors.background;ctx.fillRect(x,y,extent,extent);ctx.fillStyle=colors.line;
   for(let row=0;row<modules;row++)for(let col=0;col<modules;col++)if(qr.isDark(row,col))ctx.fillRect(x+(col+4)*unit,y+(row+4)*unit,unit,unit);
@@ -32,12 +32,12 @@ export function numericExcerpt(values,real=true){
   return (terms.slice(0,2).join(' + ')||'0').replaceAll('+ −','− ')+(terms.length>2?' + ⋯':'');
 }
 
-export function cardCopy({mode,chains,name='',guess=false,lang='en'}){
+export function cardCopy({mode,chains,name='',guess=false,lang='en',toneMap=null}){
   const zh=lang==='zh',groups=mode==='xy'?[['x',chains.x],['y',chains.y]]:[['z',chains.complex]];
   return {
     title:zh?'我的傅里叶公式':'My Fourier Formula',
     cta:zh?['扫码，看它画出我。']:['Scan to watch','it draw me.'],
-    privacy:zh?['照片不上传','只分享公式']:['No photo uploads.','Only the formula is shared.'],
+    privacy:zh?['照片不上传',toneMap?'分享公式与素描明暗':'只分享公式']:['No photo uploads.',toneMap?'Formula + sketch tones.':'Only the formula is shared.'],
     example:zh?'傅里叶的公式 → 傅里叶':'Fourier’s formula → Fourier',
     mystery:zh?'我的公式 → ?':'My formula → ?',
     nickname:!guess?name:'',
@@ -55,9 +55,9 @@ function mathLine(ctx,text,x,y,width,size){
   ctx.translate(x+left*scale,y);ctx.scale(scale,scale);ctx.fillText(text,0,0);ctx.restore();
 }
 
-export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,shareURL,lang='en'},format='34'){
+export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,shareURL,lang='en',toneMap=null},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
-  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',band=h-444,colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,lang});
+  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',band=h-444,colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,lang,toneMap});
   ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
   for(let i=0;i<22000;i++){const y=i*i*137%h;if(y>band-28)continue;ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,y,1,1);}
   ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
@@ -73,7 +73,7 @@ export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,sh
     lines.forEach((line,j)=>mathLine(ctx,line,304,y+j*62,688,52));
     ctx.fillStyle=colors.accent;ctx.font='24px "Noto Serif SC",serif';ctx.fillText(terms,308,y+106);
   });
-  const exampleTop=tall?950:680,exampleHeight=tall?410:288;
+  const exampleTop=tall?950:660,exampleHeight=tall?410:254;
   ctx.strokeStyle=colors.line+'33';ctx.strokeRect(88.5,exampleTop+.5,903,exampleHeight);
   ctx.fillStyle=colors.muted;ctx.font='26px "Noto Serif SC",serif';ctx.fillText(copy.example,112,exampleTop+48);
   ctx.fillStyle=colors.line;
@@ -82,7 +82,7 @@ export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,sh
   if(teaser){const surface=tintSketch(teaser,'ink'),scale=Math.min(300/surface.width,(exampleHeight-24)/surface.height),w=surface.width*scale,h=surface.height*scale;drawSketch(ctx,surface,978-w,exampleTop+(exampleHeight-h)/2,w,h,'ink');}
   ctx.strokeStyle=colors.accent+'55';ctx.beginPath();ctx.moveTo(72,band-28);ctx.lineTo(1008,band-28);ctx.stroke();
   const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
-  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,band+Math.floor((388-extent)/2),4);
+  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,h-56-extent,4);
   ctx.fillStyle=colors.text;ctx.font='38px "Noto Serif SC",serif';copy.cta.forEach((line,i)=>ctx.fillText(line,88,band+118+i*52));
   ctx.fillStyle=colors.muted;ctx.font='24px "Noto Serif SC",serif';copy.privacy.forEach((line,i)=>ctx.fillText(line,88,band+294+i*36));
   return {canvas:card,qrVersion:(modules-17)/4};
