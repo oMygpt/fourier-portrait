@@ -1,0 +1,12 @@
+// Static site on Cloudflare (Workers static assets). Build first: node tools/pages-dist.mjs
+// Deploy:  npx wrangler@4.166.0 deploy --config tools/site.wrangler.jsonc
+// The share API Worker (worker/wrangler.toml) owns the more specific fourier.jupyter.pro/api/* route.
+{
+  "name": "fourier-portrait",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "../dist" },
+  "routes": [{ "pattern": "fourier.jupyter.pro/*", "zone_name": "jupyter.pro" }],
+  "workers_dev": true,
+  // No request logging, matching the share Worker.
+  "observability": { "enabled": false }
+}

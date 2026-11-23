@@ -12,13 +12,13 @@ import {PALETTES,PALETTE_IDS,normalizePalette} from './palettes.mjs';
 import {backgroundComplexity,portraitCrop,detectFace,shouldEnhancePortrait,featureRegions,touchesFeature} from './portrait-preprocess.mjs';
 import {consolidatePortrait} from './strokes.mjs';
 import {analyzeSketch} from './path.mjs';
-import {numericExcerpt,cardCopy,renderSocialCard,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
+import {numericExcerpt,cardCopy,renderSocialCard,drawCardQr,cardHero,spectrumBars,editionNumber,CARD_GOLD,CARD_NIGHT} from './card.mjs';
 import {chooseLanguage,progressDetails} from './i18n.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {u2Input,u2Gray,sketchReveal,paperSketch,sketchBlend,subjectMatte} from './sketch.mjs';
-import {modelLineArt,cancelLineArt} from './ml-client.mjs';
+import {modelLineArt,cancelLineArt,STALL_MS,warmModels} from './ml-client.mjs';
 
 test('sketch matte keeps the connected portrait and its soft hair margin, not detached background blobs',()=>{
   const w=21,h=21,matte=new Uint8Array(w*h);for(let y=5;y<17;y++)for(let x=5;x<17;x++)matte[y*w+x]=255;
@@ -37,6 +37,35 @@ test('paper masking removes background and frame edges without pruning interior 
   assert.ok(paperSketch(gray,w,h,new Uint8Array(w*h).fill(128))[50*w+50]>0);
   assert.throws(()=>paperSketch([],0,0),RangeError);assert.throws(()=>paperSketch(gray,w,h,new Uint8Array(2)),RangeError);
   assert.equal(sketchBlend('ink'),'multiply');assert.equal(sketchBlend('navy'),'screen');assert.equal(sketchBlend('silver'),'screen');
+});
+
+test('upload intent warms models in the shared worker; data-saver connections skip it',async()=>{
+  const originalWorker=globalThis.Worker,originalBitmap=globalThis.createImageBitmap,instances=[];
+  globalThis.createImageBitmap=async()=>({});
+  globalThis.Worker=class{constructor(){instances.push(this);this.sent=[];}postMessage(data){this.sent.push(data);}terminate(){this.terminated=true;}};
+  try{
+    assert.equal(warmModels({saveData:true}),false);assert.equal(instances.length,0);
+    assert.equal(warmModels({}),true);assert.deepEqual(instances[0].sent,[{warm:true}]);
+    const job=modelLineArt({},'contour',()=>{});await Promise.resolve();await Promise.resolve();
+    assert.equal(instances.length,1,'the job reuses the warmed worker (and its in-flight downloads)');assert.equal(instances[0].sent[1].id>0,true);
+    instances[0].onmessage({data:{id:instances[0].sent[1].id,gray:Uint8Array.of(1)}});await job;
+  }finally{cancelLineArt();globalThis.Worker=originalWorker;globalThis.createImageBitmap=originalBitmap;}
+});
+
+test('ML client times out only after a stall, not while large models keep downloading',async t=>{
+  const originalWorker=globalThis.Worker,originalBitmap=globalThis.createImageBitmap,instances=[],updates=[];
+  t.mock.timers.enable({apis:['setTimeout']});
+  globalThis.createImageBitmap=async()=>({});
+  globalThis.Worker=class{constructor(){instances.push(this);}postMessage(data){this.id=data.id;}terminate(){this.terminated=true;}emit(data){this.onmessage({data:{id:this.id,...data}});}};
+  try{
+    const job=modelLineArt({},'contour',()=>{},d=>updates.push(d));await Promise.resolve();const worker=instances[0];
+    for(let i=0;i<5;i++){t.mock.timers.tick(STALL_MS-1000);worker.emit({received:i*1e7,total:7e7,progress:i*14});}
+    assert.ok(!worker.terminated,'a 5 × 89 s download must not time out');
+    worker.emit({gray:Uint8Array.of(1),sketchPending:true});await job;
+    t.mock.timers.tick(STALL_MS-1000);worker.emit({message:'sketching',phase:'sketching'});t.mock.timers.tick(STALL_MS-1000);
+    assert.ok(!worker.terminated);assert.equal(updates.length,0);
+    t.mock.timers.tick(1001);assert.ok(worker.terminated,'90 s with no progress falls back');assert.equal(updates[0].sketchFallback,true);
+  }finally{t.mock.timers.reset();cancelLineArt();globalThis.Worker=originalWorker;globalThis.createImageBitmap=originalBitmap;}
 });
 
 test('ML client resolves contour before a late sketch and ignores stale or failed sketch jobs',async()=>{
@@ -133,7 +162,15 @@ test('formula cards use real terms, localized copy and no private portrait',()=>
   assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).nickname,'');
   assert.equal(cardCopy({mode:'xy',chains:{x:[],y:[]}}).equations[0].text,'0');
   assert.throws(()=>cardCopy({mode:'xy',chains:{x:[{k:0,amplitude:NaN,phase:0}],y:[]}}),RangeError);
-  assert.ok(!renderSocialCard.toString().includes('sketch'));
+  assert.equal(cardHero({guess:true,sketch:{}}),'silhouette');assert.equal(cardHero({guess:false,sketch:{}}),'portrait');assert.equal(cardHero({}),'lines');
+  assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).headline,'Me = 2 rotating circles');assert.equal(zh.headline,'Ada = 2 个旋转的圆');
+});
+
+test('card fingerprint: spectrum merges conjugates per axis and the edition number is stable',()=>{
+  const chains={x:[{k:2,amplitude:3,phase:0},{k:-2,amplitude:3,phase:0},{k:0,amplitude:9,phase:0}],y:[{k:1,amplitude:1.5,phase:1}]};
+  const [x,y]=spectrumBars('xy',chains,4);assert.deepEqual(x,[0,1,0,0]);assert.ok(y[0]>0&&y[0]<1);assert.deepEqual(y.slice(1),[0,0,0]);
+  assert.equal(editionNumber('xy',chains),editionNumber('xy',structuredClone(chains)));assert.match(editionNumber('xy',chains),/^\d{5}$/);
+  assert.notEqual(editionNumber('xy',chains),editionNumber('xy',{...chains,y:[{k:1,amplitude:1.6,phase:1}]}));
 });
 
 test('polished cards wrap at term boundaries and keep one bilingual scan CTA',()=>{
@@ -158,7 +195,7 @@ test('language defaults and download details are local, bilingual and empty-safe
   assert.match(progressDetails({cached:true},'zh').bytes,/已缓存/);
   assert.match(progressDetails({},'en').bytes,/Computing/);
   assert.equal(progressDetails({received:1e6,total:0},'en').bytes,'1.0 MB');
-  assert.match(progressDetails({received:0,total:10},'zh').eta,/预计/);
+  assert.match(progressDetails({received:0,total:10},'zh').eta,/55 MB/);
 });
 
 test('creator has one XY workflow, one final overlay and only in-panel circle controls',()=>{
@@ -284,7 +321,7 @@ test('vendored QR encoder uses separate Byte and Numeric segments within v18',()
 test('card excerpts combine real conjugate terms and handle empty and invalid coefficients',()=>{
   const pair=[{k:1,amplitude:2,phase:.4},{k:-1,amplitude:2,phase:-.4}];
   assert.equal(numericExcerpt(pair),'4 cos(2πt + 0.4)');
-  assert.match(numericExcerpt(pair,false),/e⁽/);
+  assert.equal(numericExcerpt(pair,false),'(1.84 + 0.779i) e^(2πit) + (1.84 − 0.779i) e^(−2πit)');
   assert.equal(numericExcerpt([]),'0');
   assert.throws(()=>numericExcerpt([{k:NaN,amplitude:2,phase:0}]),RangeError);
 });
@@ -370,7 +407,8 @@ test('personal LaTeX includes current terms, valid delimiters and clean signs',(
   for(const mode of ['xy','complex']){
     const body=formulaBody(mode,chains),document=latexDocument(mode,chains);
     assert.ok(!body.includes('+ -'));assert.ok(!document.includes('+ -'));
-    assert.equal((body.match(/\\cos/g)||[]).length,mode==='xy'?4:0);
+    // XY: the k=0 circle is a constant, the k=±1 pair is one cosine term per axis.
+    assert.equal((body.match(/\\cos/g)||[]).length,mode==='xy'?2:0);
     assert.equal((body.match(/e\^/g)||[]).length,mode==='complex'?2:0);
     let depth=0;for(const c of document){if(c==='{')depth++;if(c==='}')depth--;assert.ok(depth>=0);}assert.equal(depth,0);
     assert.ok(document.includes('\\documentclass{article}'));assert.ok(document.includes('\\end{document}'));

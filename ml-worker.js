@@ -4,14 +4,40 @@ ort.env.wasm.numThreads=1;
 ort.env.logLevel='error';
 let session=null;
 
-async function modelBytes(file,id){
+let partsManifest=null;
+function modelParts(){
+  partsManifest??=fetch(new URL('models/parts.json',self.location.href).href).then(r=>r.ok?r.json():{}).catch(()=>({}));
+  return partsManifest;
+}
+
+// One download per model, shared by every caller (a warm-up started on upload intent, then the real job);
+// progress goes to every job waiting on it, so the client's stall timer keeps seeing activity.
+const inflight=new Map();
+function modelBytes(file,id){
+  let entry=inflight.get(file);
+  if(!entry){
+    entry={listeners:new Set(),last:null};
+    entry.promise=downloadModel(file,data=>{entry.last=data;for(const listener of entry.listeners)if(listener!=null)postMessage({id:listener,file,...data});}).catch(error=>{inflight.delete(file);throw error;});
+    inflight.set(file,entry);
+  }
+  entry.listeners.add(id);if(entry.last&&id!=null)postMessage({id,file,...entry.last});
+  return entry.promise;
+}
+
+async function downloadModel(file,notify){
   const url=new URL(`models/${file}`,self.location.href).href;
-  const notify=data=>postMessage({id,file,...data});
   let cache;
   try{cache=await caches.open('fourier-lineart-v1');const saved=await cache.match(url);if(saved){const bytes=await saved.arrayBuffer();notify({progress:100,cached:true,received:bytes.byteLength,total:bytes.byteLength});return bytes;}}catch{}
-  const response=await fetch(url);if(!response.ok)throw Error('Model download failed');
-  const total=Number(response.headers.get('content-length'))||0,reader=response.body.getReader(),chunks=[];let received=0;
-  while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:total?Math.min(99,Math.round(received/total*100)):0,received,total});}
+  // Hosts with a per-file size limit (Cloudflare Pages: 25 MiB) serve big models as parts listed in models/parts.json.
+  const parts=(await modelParts())[file],urls=parts?parts.parts.map(part=>new URL(`models/${part}`,self.location.href).href):[url];
+  const chunks=[];let received=0,total=parts?.size||0;
+  for(const partUrl of urls){
+    const response=await fetch(partUrl);if(!response.ok)throw Error('Model download failed');
+    if(!parts)total=Number(response.headers.get('content-length'))||0;
+    const reader=response.body.getReader();
+    while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:total?Math.min(99,Math.round(received/total*100)):0,received,total});}
+  }
+  if(parts&&received!==parts.size)throw Error('Model download incomplete');
   const bytes=new Uint8Array(received);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   try{await cache?.put(url,new Response(bytes,{headers:{'content-type':'application/octet-stream'}}));}catch{}
   notify({progress:100,received,total:received});return bytes;
@@ -24,7 +50,7 @@ async function run({data:{id,bitmap}}){
     catch(error){postMessage({id,message:'人像预处理暂不可用，使用原始描线',preprocessFallback:true,reason:error.message});}
     const source=portrait.image;
     if(!session){
-      const bytes=await modelBytes('contour512.onnx',id);
+      const bytes=await modelBytes('contour512-q8.onnx',id);
       let gpu=false;try{gpu=Boolean(navigator.gpu&&await navigator.gpu.requestAdapter());}catch{}
       if(gpu){try{session=await ort.InferenceSession.create(bytes,{executionProviders:['webgpu','wasm']});}catch{}}
       if(!session)session=await ort.InferenceSession.create(bytes,{executionProviders:['wasm']});
@@ -51,5 +77,17 @@ async function run({data:{id,bitmap}}){
     bitmap.close();
   }catch(error){bitmap?.close();postMessage({id,error:error.message||'Model inference failed'});}
 }
+// Warm-up: fetch the runtime and models in the order a job needs them, without joining the job queue.
+const WARM_ORDER=['yunet.onnx','modnet-q8.onnx','contour512-q8.onnx','u2net-portrait-q8.onnx'];
+let warming=null;
+function warm(){
+  warming??=(async()=>{
+    // Initialise the ONNX runtime with the tiny face model: ORT loads its ~21 MB wasm once per worker,
+    // through its own fetch, so warming it this way is reused by the job (a plain fetch was not).
+    try{await ort.InferenceSession.create(await modelBytes('yunet.onnx',null),{executionProviders:['wasm']});}catch{}
+    for(const file of WARM_ORDER)try{await modelBytes(file,null);}catch{}
+  })();
+  return warming;
+}
 let queue=Promise.resolve();
-self.onmessage=event=>{queue=queue.then(()=>run(event));};
+self.onmessage=event=>{if(event.data?.warm){warm();return;}queue=queue.then(()=>run(event));};
