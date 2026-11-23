@@ -56,3 +56,38 @@ test('formula card copy: one title, one summary, and an honest note about what t
   assert.match(hd.note,/端到端加密/);assert.match(long.note,/二维码里就是这串公式/);
   assert.equal(formulaCardCopy({formula:f,name:'Ada',lang:'en'}).title,"Ada's formula.");
 });
+
+import {persona,personaStats,CIRCLE_TIERS,LEAD_TIERS} from './persona.mjs';
+import {residueLinks,SILHOUETTE_CIRCLES} from './card.mjs';
+import {fourierPortrait} from './samples/fourier-formula.mjs';
+// n equal circles on x (plus a DC term, which never counts toward the lead circles).
+const flat=n=>({x:[{k:0,amplitude:50,phase:0},...Array.from({length:n},(_,i)=>({k:(i>>1)+1,amplitude:1,phase:0}))],y:[]});
+const pad=(chains,total)=>({...chains,y:Array.from({length:total-chains.x.length},(_,i)=>({k:1000+i,amplitude:1e-6,phase:0}))});
+test('persona: counts circles like the card, and the lead circles that hold 85% of the energy',()=>{
+  assert.deepEqual(personaStats('xy',flat(20)),{circles:21,lead:17});
+  assert.equal(personaStats('xy',{x:[{k:1,amplitude:10,phase:0},{k:2,amplitude:.1,phase:0}],y:[]}).lead,1);
+  assert.equal(personaStats('complex',{complex:[{k:1,amplitude:3,phase:0},{k:-1,amplitude:4,phase:0}]}).lead,2);
+  assert.deepEqual(personaStats('xy',{x:[],y:[]}),{circles:0,lead:0});
+  assert.match(persona('xy',{x:[],y:[]},'zh'),/0 个圆/);
+});
+test('persona: tiers calibrated on the samples, bilingual, deterministic, never about likeness',()=>{
+  // samples: gauss 293 | euler 456 | einstein 611 circles; curie 12 | euler 18 | fourier 28 lead circles
+  assert.deepEqual(CIRCLE_TIERS,[400,520]);assert.deepEqual(LEAD_TIERS,[14,22]);
+  const few=persona('xy',pad(flat(12),293),'zh'),mid=persona('xy',pad(flat(20),456),'zh'),many=persona('xy',pad(flat(33),611),'zh');
+  assert.match(few,/^293 个圆——极简派.*；前 11 个圆就拿下 85% 的能量/);
+  assert.match(mid,/^456 个圆——细节不少.*；前 18 个圆拿下 85% 的能量，分工明确。$/);
+  assert.match(many,/^611 个圆——大概是头发太有主见；要 29 个主圆才凑齐 85% 的能量/);
+  assert.match(persona('xy',pad(flat(12),293),'en'),/^293 circles: a minimalist.*the top 11 already hold 85% of the energy\.$/);
+  assert.equal(persona('xy',flat(20),'en'),persona('xy',structuredClone(flat(20)),'en'));
+  for(const line of [few,mid,many])assert.doesNotMatch(line,/神韵|像|美|丑|对称/);
+});
+test('cards: 8-circle silhouette, real epicycle residue, Fourier’s own formula',()=>{
+  assert.equal(SILHOUETTE_CIRCLES,8);
+  const values=[{k:0,amplitude:9,phase:0},{k:1,amplitude:3,phase:0},{k:-1,amplitude:3,phase:0},{k:2,amplitude:1,phase:Math.PI/2}];
+  const links=residueLinks(values,3,0);
+  assert.deepEqual(links.map(l=>l.r),[3,3,1]);assert.deepEqual([links[0].cx,links[0].cy],[0,0]);
+  assert.ok(Math.abs(links[1].cx-3)<1e-9&&Math.abs(links[2].cx-6)<1e-9&&Math.abs(links[2].y-1)<1e-9);
+  assert.ok(Math.abs(residueLinks(values,2,.3)[1].y)<1e-9); // a conjugate pair always lands on the real axis
+  const f=fourierPortrait;assert.equal(f.mode,'xy');assert.ok(f.chains.x.length+f.chains.y.length>500);
+  assert.ok(f.path.some(p=>!p.draw)&&f.path.some(p=>p.draw));assert.ok([...f.chains.x,...f.chains.y].every(c=>[c.k,c.amplitude,c.phase].every(Number.isFinite)));
+});
