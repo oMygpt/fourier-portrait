@@ -10,7 +10,7 @@ import {prepareRiddle,riddleState,recognisedAt,scoreText} from './riddle.mjs';
 import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 import {drawInk,inkProfile} from './ink.mjs';
-import {DEVELOP_SECONDS,darknessFromSurface,prepareWavesAsync,waveFrame,drawWaveInset} from './wave.mjs';
+import {DEVELOP_SECONDS,darknessFromSurface,prepareWavesAsync,waveFrame,drawWaveInset,darknessFromPhoto,photoLoopProgress,waveCountAt} from './wave.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
 import {featureRegions} from './portrait-preprocess.mjs';
@@ -34,9 +34,9 @@ let toneMap=null,toneSurface=null,sketchHasTone=false;
 let fullShare=null,fullUpload=null,fullUploadController=null,sharedReference=null,sharedFull=null,fullArrived=0,fullState='none';
 let manual=false,time=0,drawn=0,playing=true,last=0,busy=false,source='',sampleId='',strokeCount=0;
 let riddle=null,riddleStart=0,riddleScore,riddleShown=0,sharedHint='',sharedName='',sharedGuess=false,surfaceRatio=1,sharedWidth=900;
-let processing=false,processingStarted=0,downloadStarted=0,downloadFile='',progressData={},processingPhase='loading',matte=null,matteArrived=0;
+let processing=false,processingStarted=0,downloadStarted=0,downloadFile='',progressData={},processingPhase='loading',matte=null,matteArrived=0,photoWaves=null,photoWavesController=null;
 let cardShareURL='',videoController=null,cardSurface=null,cardPayload=null,cardGeneration=0,status=()=>'',errorText=()=>'',formulaStatus=()=>'',cardStatus=()=>'';
-const samples=[['fourier','傅里叶','Fourier','Fourier2.jpg'],['einstein','爱因斯坦','Einstein','Albert_Einstein_Head.jpg'],['newton','牛顿','Newton','GodfreyKneller-IsaacNewton-1689.jpg'],['curie','居里夫人','Curie','Marie_Curie_c1920.jpg'],['euler','欧拉','Euler','Leonhard_Euler.jpg'],['gauss','高斯','Gauss','Carl_Friedrich_Gauss_1840_by_Jensen.jpg']];
+const samples=[['fourier','傅里叶','Fourier','Fourier2.jpg'],['einstein','爱因斯坦','Einstein','Albert_Einstein_Head.jpg'],['newton','牛顿','Newton','GodfreyKneller-IsaacNewton-1689.jpg'],['curie','居里夫人','Curie','Marie_Curie_c1920.jpg'],['euler','欧拉','Euler','Leonhard_Euler.jpg'],['gauss','高斯','Gauss','Carl_Friedrich_Gauss_1840_by_Jensen.jpg'],['monalisa','蒙娜丽莎','Mona Lisa','Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg'],['vangogh','梵高','Van Gogh','Vincent_van_Gogh_-_Self-Portrait_-_Google_Art_Project.jpg']];
 const t=(zh,en)=>lang==='zh'?zh:en,colors=()=>getPalette(palette),chains=()=>({x:activeX,y:activeY,complex:active});
 function applyPalette(value){palette=normalizePalette(value);document.body.dataset.palette=palette;document.documentElement.style.background=colors().background;document.querySelector('meta[name="theme-color"]').content=colors().background;tinted=null;}
 const cardType=()=>$('card-type').value;
@@ -69,7 +69,7 @@ function updateUI(){
   if(path.length&&!demo)previewFormula();
   if(processing)updateProcessing();
 }
-function setProcessing(value){processing=value;$('processing').hidden=!value;document.body.classList.toggle('processing-active',value);updateUI();}
+function setProcessing(value){processing=value;stopPhotoWaves();$('processing').hidden=!value;document.body.classList.toggle('processing-active',value);updateUI();}
 function updateProcessing(){
   const labels={loading:t('正在加载模型','Loading the models'),matting:t('正在分离人物与背景','Separating you from the background'),sketching:t('光影正在落纸','Bringing the sketch to paper'),formula:t('正在计算你的公式','Computing your formula')};
   const percentage=progressData.progress??(processingPhase==='loading'?0:100);
@@ -80,7 +80,9 @@ function updateProcessing(){
   $('processing-bytes').textContent=detail.bytes;
   $('processing-eta').textContent=progressData.cached?t('缓存命中 · 继续本地处理','Cache hit · Continuing locally'):detail.eta;
   for(const item of document.querySelectorAll('[data-step]')){const current=item.dataset.step===processingPhase;item.classList.toggle('active',current);if(current)item.setAttribute('aria-current','step');else item.removeAttribute('aria-current');}
-  $('matte-note').textContent=matte?t('真实背景遮罩 · 本地计算','Actual subject mask · Computed locally'):t('原图预览 · 等待背景遮罩','Original preview · Waiting for the subject mask');
+  const developing=Boolean(currentPhotoWaves());$('matte-title').hidden=developing;$('wave-title').hidden=$('wave-detail').hidden=!developing;
+  if(developing){Object.assign(photoWaves,{label:'',progress:-1,inset:null});$('wave-note').textContent=t('← 此刻最强的一道波','← The strongest wave right now');}
+  $('matte-note').textContent=matte?t('真实背景遮罩 · 本地计算','Actual subject mask · Computed locally'):developing?t('二维傅里叶 · 由低频到高频 · 本地计算','2D Fourier · low to high frequency · on this device'):t('原图预览 · 等待背景遮罩','Original preview · Waiting for the subject mask');
 }
 function onProgress(data,token){
   if(token!==generation)return;
@@ -158,7 +160,7 @@ async function loadImage(src,name,isDemo=false,id=''){
   if(!isDemo)setProcessing(true);
   try{
     const image=src instanceof HTMLImageElement?src:new Image();if(typeof src==='string'){image.src=src;await image.decode();}
-    if(token!==generation)return;picture=image;updateUI();
+    if(token!==generation)return;picture=image;if(!id&&!isDemo)startPhotoWaves(image,token);updateUI();
     const result=await prepare(image,id,token);if(token!==generation)return;
     ({path,coefficients,dimensions,automatic,bounds}=result);xCoefficients=result.x;yCoefficients=result.y;strokeCount=result.strokes.length;mode='xy';manual=false;
     sketch=result.sketch;tinted=null;sketchPending=Boolean(result.sketchPending);sketchHasTone=result.hasTone;sketchArrived=developStart=0;installed=token;
@@ -269,9 +271,27 @@ function render(){
   let tip;if(mode==='xy'){const X=drawChain(activeX,topChain),Y=drawChain(activeY,leftChain,Math.PI/2);tip={x:X.x,y:Y.y};ctx.strokeStyle=colors().accent+'70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=colors().text;ctx.font=`${Math.max(26,12*900/canvas.getBoundingClientRect().width)}px "Noto Serif SC",serif`;ctx.textAlign='right';ctx.fillText('X · x(t)',210,180);ctx.textAlign='center';ctx.save();ctx.translate(34,530);ctx.rotate(-Math.PI/2);ctx.fillText('Y · y(t)',0,0);ctx.restore();ctx.textAlign='left';}else tip=drawChain(active,{x:plot.x,y:plot.y});
   ctx.fillStyle=colors().accent;ctx.beginPath();ctx.arc(tip.x,tip.y,2.6,0,Math.PI*2);ctx.fill();
 }
+// While the models download, the photo itself is developed as a 2D Fourier series (grayscale darkness, low → high frequency) on a loop.
+function startPhotoWaves(image,token){
+  stopPhotoWaves();const controller=new AbortController();photoWavesController=controller;
+  try{const {darkness,width,height}=darknessFromPhoto(image);
+    prepareWavesAsync(darkness,width,height,{signal:controller.signal}).then(waves=>{if(controller.signal.aborted||token!==generation||!processing)return;photoWaves={waves,token,start:performance.now(),cache:{},progress:-1,level:null,label:''};updateProcessing();}).catch(()=>{});
+  }catch{}
+}
+function stopPhotoWaves(){photoWavesController?.abort();photoWavesController=null;photoWaves=null;}
+function currentPhotoWaves(){return processing&&photoWaves?.token===generation?photoWaves:null;}
+function photoWaveFrame(state,now){
+  const progress=photoLoopProgress((now-state.start)/1000,{reduced:reduced.matches});
+  if(progress!==state.progress){state.progress=progress;state.level=waveFrame(state.waves,progress,[1,3,5].map(i=>parseInt(colors().line.slice(i,i+2),16)),state.cache).level;}
+  const count=waveCountAt(state.waves,progress),label=t(`你的照片，正被拆成 ${count.toLocaleString('zh-CN')} 个平面波`,`Your photo, split into ${count.toLocaleString('en')} plane waves`);
+  if(label!==state.label){state.label=label;$('wave-title').textContent=label;}
+  if(state.inset!==state.level){state.inset=state.level;const inset=$('wave-inset'),ix=inset.getContext('2d');ix.fillStyle=colors().background;ix.fillRect(0,0,inset.width,inset.height);drawWaveInset(ix,state.level?.wave,0,0,inset.width,colors());}
+  return state.cache.canvas;
+}
 function renderMatte(now){
   if(!processing||!picture)return;const c=$('matte-canvas'),cx=c.getContext('2d',{willReadFrequently:true}),ratio=Math.min(c.width/picture.naturalWidth,c.height/picture.naturalHeight),w=Math.round(picture.naturalWidth*ratio),h=Math.round(picture.naturalHeight*ratio),x=Math.floor((c.width-w)/2),y=Math.floor((c.height-h)/2);
-  cx.clearRect(0,0,c.width,c.height);cx.drawImage(picture,x,y,w,h);
+  cx.clearRect(0,0,c.width,c.height);const developing=currentPhotoWaves();
+  if(developing){cx.fillStyle=colors().background;cx.fillRect(x,y,w,h);cx.imageSmoothingQuality='high';cx.drawImage(photoWaveFrame(developing,now),x,y,w,h);}else cx.drawImage(picture,x,y,w,h);
   if(matte){const pixels=cx.getImageData(x,y,w,h),fade=reduced.matches?1:Math.min(1,(now-matteArrived)/1600);
     for(let j=0;j<h;j++)for(let i=0;i<w;i++){const a=matte.gray[Math.min(matte.height-1,Math.floor(j/h*matte.height))*matte.width+Math.min(matte.width-1,Math.floor(i/w*matte.width))]/255;pixels.data[(j*w+i)*4+3]=Math.round(255*(1-fade*(1-a)));}
     cx.putImageData(pixels,x,y);

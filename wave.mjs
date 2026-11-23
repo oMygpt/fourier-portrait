@@ -82,7 +82,38 @@ export function blendLevels(waves,progress,out=new Float32Array(waves.width*wave
   return {image:out,level:waves.levels[f<.5?index:Math.min(waves.levels.length-1,index+1)]};
 }
 
+// The model-download wait: the photo itself (grayscale darkness) developed from waves, on a loop.
+export const PHOTO_SIDE=192,PHOTO_DEVELOP=7,PHOTO_HOLD=2.5;
+
+// RGBA photo → darkness 0..1 (1 − luminance), stretched between the 2nd and 98th percentiles so dull photos still read.
+export function photoDarkness(rgba,width,height){
+  const n=width*height;if(!n||rgba.length<n*4)throw new RangeError('Invalid photo');
+  const dark=new Float32Array(n),histogram=new Uint32Array(256);
+  for(let i=0;i<n;i++){const a=rgba[i*4+3]/255,l=(.299*rgba[i*4]+.587*rgba[i*4+1]+.114*rgba[i*4+2])*a+255*(1-a),v=Math.round(255-l);dark[i]=v;histogram[v]++;}
+  const at=q=>{let sum=0;for(let v=0;v<256;v++){sum+=histogram[v];if(sum>=q*n)return v;}return 255;},low=at(.02),high=Math.max(low+1,at(.98));
+  for(let i=0;i<n;i++)dark[i]=Math.max(0,Math.min(1,(dark[i]-low)/(high-low)));
+  return dark;
+}
+
+// Loop timing: develop over `develop` seconds, hold the finished photo for `hold`, start again. Reduced motion: always finished.
+export function photoLoopProgress(seconds,{develop=PHOTO_DEVELOP,hold=PHOTO_HOLD,reduced=false}={}){
+  if(reduced||!(seconds>0))return reduced?1:0;
+  return Math.min(1,(seconds%(develop+hold))/develop);
+}
+
+// Live plane-wave count at a progress (eased between rungs, like the image).
+export function waveCountAt(waves,progress){
+  const {index,f}=waveState(progress,waves.levels.length),a=waves.levels[index].waves,b=waves.levels[Math.min(waves.levels.length-1,index+1)].waves;
+  return Math.round(a+(b-a)*f);
+}
+
 // ---- browser helpers ----
+export function darknessFromPhoto(image,side=PHOTO_SIDE){
+  const w0=image.naturalWidth||image.width,h0=image.naturalHeight||image.height,scale=Math.min(1,side/Math.max(w0,h0)),width=Math.max(1,Math.round(w0*scale)),height=Math.max(1,Math.round(h0*scale));
+  const c=document.createElement('canvas');c.width=width;c.height=height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0,width,height);
+  return {darkness:photoDarkness(ctx.getImageData(0,0,width,height).data,width,height),width,height};
+}
+
 export function darknessFromSurface(surface){
   const scale=Math.min(1,MAX_SIDE/Math.max(surface.width,surface.height)),width=Math.max(1,Math.round(surface.width*scale)),height=Math.max(1,Math.round(surface.height*scale));
   const c=document.createElement('canvas');c.width=width;c.height=height;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(surface,0,0,width,height);

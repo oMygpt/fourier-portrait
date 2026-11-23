@@ -28,5 +28,15 @@
     "face": null,
     "landmarks": [],
     "strategy": "original"
+  },
+  "monalisa": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
+  },
+  "vangogh": {
+    "face": null,
+    "landmarks": [],
+    "strategy": "original"
   }
 }

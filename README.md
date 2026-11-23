@@ -8,7 +8,7 @@
 
 运行 `python3 -m http.server 8080`，通过 http://localhost:8080 打开（ES 模块需要 HTTP，不能直接双击 HTML）。整个目录可部署到 GitHub Pages。
 
-1. 上传 JPG / PNG、拖入照片，或选择六个公有领域名人样例。
+1. 上传 JPG / PNG、拖入照片，或选择八个公有领域样例（六位科学家与《蒙娜丽莎》、梵高自画像）。
 2. 显著的处理面板显示实际模型下载字节 / MB、四个处理步骤和粗略剩余时间。背景分离后显示真实 MODNet 遮罩的渐隐预览；尚未生成时明确显示为原图预览。网络估算基于当前下载速率，本地计算仅显示粗略范围。
 3. 圆周轮廓就绪后先开始双轴 XY 绘制；素描继续在 Worker 中生成，处理面板保持可见，直到素描到达或回退。缓存模型可直接进入本地处理。
 4. 完成后自动呈现素描与傅里叶线条叠加的唯一结果；保存 PNG 即保存这一结果。可暂停、跳到完成、重播或换图。
@@ -53,7 +53,7 @@ A completely static, private Fourier portrait app. Your photo never leaves your 
 
 Run `python3 -m http.server 8080` and open http://localhost:8080 (ES modules require HTTP). Deploy this directory directly to GitHub Pages.
 
-1. Upload/drop a JPG or PNG, or choose one of six public-domain samples.
+1. Upload/drop a JPG or PNG, or choose one of eight public-domain samples (six scientists, the Mona Lisa and a Van Gogh self-portrait).
 2. A prominent processing panel shows real model download bytes / MB, four processing steps and a rough ETA. An actual MODNet subject mask fades away the background once available; until then, the image is labeled as an original preview. Download estimates use the current transfer rate; compute estimates are deliberately approximate.
 3. XY circles begin when contours are ready. The worker keeps computing the sketch, and the processing panel remains visible until it arrives or falls back. Cached models proceed directly to local computation.
 4. One best final overlay is shown automatically. The PNG download is that overlay. Pause, skip, replay or choose another photo.

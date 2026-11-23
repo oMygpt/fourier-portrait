@@ -25,7 +25,7 @@
           <progress id="model-progress" max="100" value="0"></progress>
           <div class="download-details"><span id="processing-bytes"></span><span id="processing-eta"></span></div>
           <ol id="processing-steps"><li data-step="loading" data-zh="加载模型">Loading model</li><li data-step="matting" data-zh="分离背景">Removing background</li><li data-step="sketching" data-zh="生成素描">Sketching</li><li data-step="formula" data-zh="计算公式">Computing formula</li></ol>
-          <div class="matte-preview"><canvas id="matte-canvas" width="280" height="200"></canvas><div><b data-zh="让背景退去，让你留下">Less background.<br>More you.</b><p id="matte-note"></p></div></div>
+          <div class="matte-preview"><canvas id="matte-canvas" width="280" height="200"></canvas><div><b id="matte-title" data-zh="让背景退去，让你留下">Less background.<br>More you.</b><b id="wave-title" hidden></b><p id="wave-detail" class="wave-detail" hidden><canvas id="wave-inset" width="64" height="64" aria-hidden="true"></canvas><span id="wave-note"></span></p><p id="matte-note"></p></div></div>
           <p class="hint" data-zh="圆周就绪便会先画；素描完成后轻轻落纸。">The circles start as soon as they can. The sketch joins when ready.</p>
         </section>
         <section id="riddle" class="riddle" hidden aria-live="polite"><p id="riddle-hint" class="riddle-hint"></p><p id="riddle-count" class="riddle-count"></p><p class="hint" data-zh="圆会越来越多。越早认出来，说明你越懂 TA。">More circles keep arriving. The sooner you know who it is, the better you know them.</p><div class="action-row"><button id="riddle-got" class="primary" data-zh="我认出来了！">I know who it is!</button><button id="riddle-give-up" class="quiet" data-zh="直接揭晓">Just show me</button></div></section>
