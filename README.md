@@ -29,7 +29,7 @@ U²-Net portrait q8（44.23MB，Apache-2.0）仅作素描层。contour 与 XDoG 
 - **同一个公式**：网页预览、LaTeX 导出、三种卡片、视频片头和二维码都由 `formula.mjs` 生成同一种写法：x(t) = a₀ + Σ aₖ cos(2πkt + φₖ)，每一项是一对反向旋转的圆。「圆」指旋转的圆，「项」指写出的 cos 项。
 - **公式卡**（「这是我的公式。它能复原我的样子。」）：二维码就是公式本身（自包含链接，不经服务器、不会过期）。卡上印出的各项、线条肖像（只用公式画，不叠素描）与「N 个圆 · 项数 · 保留能量」都从二维码自身的数据解码得到，访客网页显示的是同一串数字。
 - **画像卡**：主角是你的傅里叶画像（素描 + 圆周线条），配「我 = N 个旋转的圆」、真实系数、频谱指纹（每个频率的振幅）与由公式生成的编号。开启「猜猜我是谁」时卡片不露脸，只显示 16 个圆的轮廓。
-- **绘制视频**（9:16，约 16 秒，优先 MP4）：圆链画出肖像 → 频率阶梯（2 → 4 → … → 全部圆，显示保留能量）→ 素描显影 → 短二维码。实时录制，需保持页面在前台。
+- **绘制视频**（9:16，18 秒，优先 MP4；结果页与卡片窗口均可保存）：圆链画出肖像 → 频率阶梯（2 → 4 → … → 全部圆，显示保留能量）→ 素描显影 → 短二维码。实时录制，需保持页面在前台。
 - **猜猜我是谁**：访客先看到 2 个圆画出的曲线，圆数每 1.8 秒翻倍（2 → 4 → … → 全部），可显示创作者的提示语（≤12 字，写入二维码与文字链接）。按「我认出来了」记录当时的圆数，再揭晓素描与名字；成绩卡只含 16 个圆的轮廓、成绩与指回同一谜题的二维码，不含名字和脸，可转发挑战。不做服务端统计。
 - **撤回**：每次上传附带随机删除令牌的 SHA-256；令牌只保存在本机「我的分享」中，可随时删除服务器上的密文。他人已保存的副本无法撤回。
 
@@ -74,7 +74,7 @@ Default share links include coefficients, pen lifts, dimensions, an optional nic
 - **One formula**: the page preview, LaTeX export, all three cards, the video header and the QR are produced by `formula.mjs` in one notation: x(t) = a₀ + Σ aₖ cos(2πkt + φₖ), each term one pair of counter-rotating circles. “Circles” count rotating circles; “terms” count written cosine terms.
 - **Formula card** (“This is my formula. It can bring back how I look.”): the QR *is* the formula (self-contained link, no server, no expiry). The printed terms, the line portrait (drawn from the formula alone, no sketch) and the “circles · terms · energy” line are all decoded from the QR's own payload; the visitor page shows the same numbers.
 - **Portrait card**: the hero is your Fourier portrait (sketch + circle lines) with “Me = N rotating circles”, real coefficients, a spectral fingerprint and an edition number derived from the formula. In guessing mode the card shows only a 16-circle silhouette.
-- **Drawing video** (9:16, ~16 s, MP4 preferred): chains draw the portrait → frequency ladder (2 → 4 → … → all circles, with retained energy) → sketch develops → short QR. Recorded in real time; keep the page visible.
+- **Drawing video** (9:16, 18 s, MP4 preferred; from the result page or the card dialog): chains draw the portrait → frequency ladder (2 → 4 → … → all circles, with retained energy) → sketch develops → short QR. Recorded in real time; keep the page visible.
 - **Guess who**: visitors first see a 2-circle curve; the count doubles every 1.8 s (2 → 4 → … → all), with the creator's optional hint (≤12 characters, carried in both QR and text link). “I know who it is!” records the circle count, then reveals sketch and name. The score card shows only a 16-circle silhouette, the score and a QR back to the same riddle — no name, no face — so it can be forwarded as a challenge. No server-side statistics.
 - **Withdrawal**: each upload carries the SHA-256 of a random delete token kept only in this browser's “My shares”; the stored ciphertext can be deleted at any time. Copies others saved cannot be recalled.
 
@@ -98,5 +98,5 @@ Default visitors need only the static app assets, not a model, original photo or
 - E1 is an optional 52-byte section: tag/version, 16-bit body length, 16-byte object id and 32-byte raw key. AES-GCM ciphertext uses a version byte, 12-byte IV and authentication tag; image MIME is authenticated inside the encrypted plaintext.
 - QR uses separate Byte (URL) and Numeric (payload) segments. Tone/encrypted-reference shares have an 8000-bit budget (≤ v22); links with neither retain 5760 bits (≤ v18). Four-pixel integer modules and a four-module quiet zone are preserved. Coefficients may be trimmed to fit; the visitor slider selects from those transmitted. Cards retain the creator's full-N first terms and counts. Coarse tones cannot reproduce fine U²-Net hair or facial texture.
 - Share base: `https://fourier.jupyter.pro/`; storage API same-origin at `https://fourier.jupyter.pro/api` (Worker route). Old `omygpt.github.io` links and the workers.dev API keep working. Local verification must replace only the origin/path while keeping the exact fragment.
-- Tests: `node --test fourier.test.mjs tone.test.mjs encrypted-sketch.test.mjs bundle.test.mjs video.test.mjs riddle.test.mjs formula.test.mjs ink.test.mjs wave.test.mjs worker/worker.test.mjs`. Syntax: `node --check app.js` (and other modified modules). Whitespace: `git diff --check`.
+- Tests: `node --test fourier.test.mjs tone.test.mjs encrypted-sketch.test.mjs bundle.test.mjs video.test.mjs riddle.test.mjs formula.test.mjs ink.test.mjs wave.test.mjs worker/worker.test.mjs pacing.test.mjs`. Syntax: `node --check app.js` (and other modified modules). Whitespace: `git diff --check`.
 - Model origins, sizes and licenses: [models/README.md](models/README.md). Third-party license files are vendored with their assets.

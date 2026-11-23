@@ -53,5 +53,5 @@ test('encrypted cards disclose sketch storage and never print the decryption key
 });
 test('HD sharing is on by default, explicitly described and never uploads the photo',async()=>{
   const html=await readFile(new URL('./index.html',import.meta.url),'utf8'),input=html.match(/<input id="include-full"[^>]*>/)?.[0];
-  assert.ok(input);assert.match(input,/\bchecked\b/);assert.match(html,/Only ciphertext of the processed result is uploaded; the original photo is not/);assert.match(html,/copies others saved cannot be recalled/);assert.match(html,/withdraw the stored copy at any time/);assert.match(html,/Uncheck to keep only the formula/);
+  assert.ok(input);assert.match(input,/\bchecked\b/);assert.match(html,/Your photo itself is never uploaded; only the encrypted sketch and formula are/);assert.match(html,/copies others saved cannot be recalled/);assert.match(html,/withdraw the stored copy at any time/);assert.match(html,/Uncheck to keep only the formula/);
 });

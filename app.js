@@ -5,7 +5,9 @@ import {formulaBody,latexDocument,limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,cleanHint,SHARE_BASE} from './share.mjs';
 import {renderSocialCard,renderScoreCard,renderFormulaCard,drawCardQr} from './card.mjs';
 import {canonicalFormula,formulaSummary} from './formula.mjs';
-import {prepareVideo,recordVideo,preferredVideoType} from './video.mjs';
+import {prepareVideo,recordVideo,preferredVideoType,videoDuration} from './video.mjs';
+import {DRAW_SECONDS,drawWarp} from './pacing.mjs';
+import {trimLadder} from './ladder.mjs';
 import {prepareRiddle,riddleState,recognisedAt,scoreText} from './riddle.mjs';
 import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
@@ -32,7 +34,7 @@ let waves=null,wavesSource=null,wavesController=null,wavesCache={},developStart=
 let picture=null,sketch=null,tinted=null,sketchPending=false,sketchArrived=0,lateSketch=null,installed=0,pathWorker=null;
 let toneMap=null,toneSurface=null,sketchHasTone=false;
 let fullShare=null,fullUpload=null,fullUploadController=null,sharedReference=null,sharedFull=null,fullArrived=0,fullState='none';
-let manual=false,time=0,drawn=0,playing=true,last=0,busy=false,source='',sampleId='',strokeCount=0;
+let manual=false,time=0,clock=0,approx=null,drawn=0,playing=true,last=0,busy=false,source='',sampleId='',strokeCount=0;
 let riddle=null,riddleStart=0,riddleScore,riddleShown=0,sharedHint='',sharedName='',sharedGuess=false,surfaceRatio=1,sharedWidth=900;
 let processing=false,processingStarted=0,downloadStarted=0,downloadFile='',progressData={},processingPhase='loading',matte=null,matteArrived=0;
 let cardShareURL='',videoController=null,cardSurface=null,cardPayload=null,cardGeneration=0,status=()=>'',errorText=()=>'',formulaStatus=()=>'',cardStatus=()=>'';
@@ -44,21 +46,22 @@ function count(){return mode==='xy'?activeX.length+activeY.length:active.length;
 function updateUI(){
   translatePage(lang);
   $('heading').textContent=shared?(sharedGuess&&stage!=='result'?t('猜猜这是谁？','Guess who?'):sharedName?t(`${sharedName}的傅里叶画像`,`${sharedName} · A Fourier portrait`):t('一份写在圆周里的肖像','A portrait written in circles')):stage==='landing'?t('每个人，都有自己的圆周。','You are a thousand little circles.'):stage==='result'?t('原来，圆周记得你。','The circles remember you.'):t('让时间，慢慢画出你。','Let the circles bring you to life.');
-  $('story').textContent=shared?(sharedReference?t('加密素描仅在你的浏览器中解密，不含原始照片。','The encrypted sketch is decrypted only in your browser. No original photo.'):toneMap?t('由公式与低分辨率明暗重建，不含原始照片或完整素描。','Rebuilt from a formula and coarse sketch tones. No original photo or full sketch.'):t('仅由公式重建，不含原始照片或素描。','Reconstructed from a formula. No original photo or sketch.')):t('让一张照片化作纸上素描，再借旋转的圆，慢慢将你唤回。','A photo becomes a sketch on paper. Then rotating circles slowly bring you back.');
+  $('story').textContent=shared?(sharedReference?t('素描以密文形式从服务器取回，只在你的浏览器里解密；分享者的原始照片从未上传。','The sketch was fetched from the server as ciphertext and decrypted only in your browser. The sender’s original photo was never uploaded.'):toneMap?t('这幅画像由链接中的公式与粗略明暗在你的浏览器里重建，不含原始照片或完整素描。','Rebuilt in your browser from the formula and coarse tones carried in the link. No original photo, no full sketch.'):t('这幅画像仅由链接中的公式在你的浏览器里重建，不含原始照片或素描。','Rebuilt in your browser from the formula in the link alone. No original photo or sketch.')):t('任何一条线，都能由旋转的圆画出。让一张照片化作纸上素描，再借数百个旋转的圆，慢慢将你唤回。','Any line can be drawn by rotating circles. A photo becomes a sketch on paper; then hundreds of rotating circles slowly bring you back.');
   $('landing-actions').hidden=shared||stage!=='landing'||processing;
   $('working-actions').hidden=stage!=='drawing'||demo;
   $('result-actions').hidden=shared||stage!=='result';
   $('shared-start').hidden=!shared||stage==='riddle';
   if(shared&&sharedGuess&&stage==='result')$('shared-start').textContent=t('回赠一张 ↗','Send one back ↗');
   $('riddle').hidden=stage!=='riddle';$('riddle-hint').hidden=!sharedHint;$('riddle-hint').textContent=t('提示：','Hint: ')+sharedHint;
+  const waiting=stage==='riddle'&&Boolean(riddle?.waiting);$('riddle-actions').hidden=waiting;$('riddle-more').hidden=waiting;$('riddle-sealed').hidden=!waiting;
   $('riddle-result').hidden=!(shared&&sharedGuess&&stage==='result'&&riddle&&riddleScore!==undefined);
   if(riddle)$('riddle-score').textContent=scoreText(riddleScore,riddle.total,lang);
-  $('card-hint-row').hidden=!cardType()==='guess';
+  $('card-hint-row').hidden=cardType()!=='guess';
   $('personal-formula').hidden=!path.length||demo||(!shared&&processing)||stage==='riddle';
   $('shared-controls').hidden=!shared;
   $('play').textContent=playing?t('Ⅱ 暂停绘制','Ⅱ Pause'):t('▷ 继续绘制','▷ Continue');
   $('download').disabled=sketchPending;
-  $('open-card').disabled=sketchPending||processing;
+  $('open-card').disabled=sketchPending||processing;$('save-video-result').disabled=sketchPending||processing||Boolean(videoController)||!preferredVideoType();$('save-video-result').title=t(`${videoDuration()} 秒竖屏视频 · 在本地录制，不上传`,`${videoDuration()} s vertical video · Recorded locally, nothing uploaded`);
   $('include-full').disabled=!sketchHasTone||sketchPending||processing;
   $('shared-sketch-note').hidden=!shared||!sharedReference||fullState==='ready';
   $('shared-sketch-note').textContent=fullState==='loading'?t('正在获取并本地解密完整素描…','Fetching and locally decrypting the full sketch…'):toneMap?t('完整素描已过期或不可用，已保留本地明暗预览。','Full sketch unavailable or expired. Showing the local tone preview.'):t('完整素描不可用，已保留公式画像。','Full sketch unavailable. Showing the formula portrait.');
@@ -150,7 +153,7 @@ async function prepare(image,id,token){
 }
 async function loadImage(src,name,isDemo=false,id=''){
   const token=++generation;cancelLineArt(true);pathWorker?.terminate();pathWorker=null;lateSketch=null;busy=true;
-  fullUploadController?.abort();fullUploadController=null;fullUpload=null;fullShare=null;$('include-full').checked=true;cardGeneration++;cardPayload=cardSurface=null;
+  fullUploadController?.abort();fullUploadController=null;fullUpload=null;fullShare=null;$('include-full').checked=true;cardGeneration++;cardPayload=cardSurface=null;cardShareURL='';
   if($('card-dialog').open)$('card-dialog').close();
   toneMap=toneSurface=null;sketchHasTone=false;
   errorText=()=>'';matte=null;matteArrived=0;processingStarted=performance.now();downloadStarted=processingStarted;downloadFile='';progressData={};processingPhase=id?'formula':'loading';
@@ -179,17 +182,18 @@ function layout(){
 }
 function reset(isDemo=false){
   const n=Number($('terms').value);active=coefficients.slice(0,manual?n:automatic?.complex.count);activeX=xCoefficients.slice(0,manual?n:automatic?.x.count);activeY=yCoefficients.slice(0,manual?n:automatic?.y.count);
-  time=drawn=0;playing=true;demo=isDemo;stage=isDemo?'landing':'drawing';document.body.dataset.stage=stage;ink.clearRect(0,0,900,900);layout();
+  time=clock=drawn=0;approx=null;playing=true;demo=isDemo;stage=isDemo?'landing':'drawing';document.body.dataset.stage=stage;ink.clearRect(0,0,900,900);layout();
   if(!manual)$('terms').value=String(Math.max(activeX.length,activeY.length));
   $('shared-terms').value=String(count());updateUI();
 }
-function finish(){time=1;stage='result';document.body.dataset.stage=stage;layout();ink.clearRect(0,0,900,900);drawn=0;if(shared)drawSharedPortrait();else drawTrail(7200);updateUI();}
+function finish(){time=clock=1;approx=null;stage='result';document.body.dataset.stage=stage;layout();ink.clearRect(0,0,900,900);drawn=0;if(shared)drawSharedPortrait();else drawTrail(7200);updateUI();}
 function previewFormula(){
   const limit=narrow.matches?1:2,body=formulaBody(mode,chains(),limit,lang);$('formula-preview').textContent=body;
   if(window.katex)window.katex.render(body,$('formula-preview'),{throwOnError:false,displayMode:true});
   $('terms-value').value=mode==='xy'?`X ${activeX.length} / Y ${activeY.length}`:String(active.length);
-  const summary=formulaSummary(canonicalFormula(mode,chains()),lang);
-  $('formula-count').textContent=shared?t(`${summary} · 这张画像完全由这串公式复原`,`${summary} · This portrait is rebuilt from this formula alone`):t(`${manual?'手动 N':'自动 N'} · ${summary} · 预览每轴前 ${limit} 项`,`${manual?'Manual N':'Automatic N'} · ${summary} · first ${limit} ${limit===1?'term':'terms'} per axis`);
+  // Written terms are cosine terms (XY: one term = a pair of counter-rotating circles); "circles" counts every circle.
+  const circles=canonicalFormula(mode,chains()).circles,pairs=mode==='xy';
+  $('formula-count').textContent=shared?t(`由 ${circles} 个旋转的圆合成 · 这张画像完全由这串公式复原`,`Made of ${circles} rotating circles · This portrait is rebuilt from this formula alone`):t(`${manual?'手动设定 · ':''}由 ${circles} 个旋转的圆合成 · 上方是每轴前 ${limit} 项${pairs?'（每项是一对反向旋转的圆）':''}`,`${manual?'Set by hand · ':''}Made of ${circles} rotating circles · Above: the first ${limit} ${limit===1?'term':'terms'} per axis${pairs?' (each term is a pair of counter-rotating circles)':''}`);
   $('restore-auto').hidden=!manual;$('shared-count').textContent=t(`${count()} / ${$('shared-terms').max} 个圆`,`${count()} / ${$('shared-terms').max} circles`);
 }
 function pen(t){const p=mode==='xy'?{x:chainTip(activeX,t).x,y:chainTip(activeY,t,Math.PI/2).y}:evaluate(active,t);return{x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale};}
@@ -252,19 +256,39 @@ function revealRiddle(n){
   if(stage!=='riddle')return;riddleScore=n;fullArrived=developStart=performance.now();finish();
 }
 function riddleNow(){return riddleState((performance.now()-riddleStart)/1000,riddle.rungs.length);}
-function renderRiddle(){
-  const state=riddleNow();if(state.done){revealRiddle(null);return;}
-  const a=riddle.rungs[state.index],b=riddle.rungs[Math.min(riddle.rungs.length-1,state.index+1)],f=state.morph,shown=recognisedAt(riddle.rungs,state);
+// Frequency ladder (2 → 4 → … → all circles), morphing between rungs; shared by the riddle and "watch it converge".
+function drawRungs(rungs,state){
+  const a=rungs[state.index],b=rungs[Math.min(rungs.length-1,state.index+1)],f=state.morph;
   const map=p=>({x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}),points=a.points.map((p,i)=>({x:p.x+(b.points[i].x-p.x)*f,y:p.y+(b.points[i].y-p.y)*f,draw:f<.5?p.draw:b.points[i].draw}));
   ctx.lineCap=ctx.lineJoin='round';
   ctx.strokeStyle=colors().guide;ctx.lineWidth=1;ctx.beginPath();points.forEach((p,i)=>{const q=map(p);if(!i)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();
   ctx.strokeStyle=colors().line;drawInk(ctx,points,f<.5?a.ink:b.ink,map,{width:2.6});
+  $('drawing-progress').value=(state.index+f)/Math.max(1,rungs.length-1);
+  return recognisedAt(rungs,state);
+}
+function renderRiddle(){
+  // All circles arrived: stay on the pure line drawing and wait for the visitor to stamp the seal.
+  const state=riddleNow();if(state.done&&!riddle.waiting){riddle.waiting=true;updateUI();}
+  const shown=drawRungs(riddle.rungs,state);
   if(shown!==riddleShown){riddleShown=shown;$('progress').textContent=`N = ${shown}`;$('riddle-count').textContent=t(`现在：${shown} 个圆 / 共 ${riddle.total} 个`,`Now: ${shown} of ${riddle.total} circles`);}
-  $('drawing-progress').value=(state.index+f)/Math.max(1,riddle.rungs.length-1);
+}
+const APPROX_STEP=1.3,APPROX_HOLD=2.2;
+function startApprox(){
+  if(stage!=='result'||!path.length)return;
+  try{const rungs=trimLadder(prepareRiddle(mode,chains(),path,2400).rungs);approx={rungs,total:rungs.at(-1).n,start:performance.now()};}catch{approx=null;}
+}
+function renderApprox(){
+  const state=riddleState((performance.now()-approx.start)/1000,approx.rungs.length,APPROX_STEP,APPROX_HOLD);
+  if(state.done){approx=null;$('progress').textContent='100%';$('drawing-progress').value=1;return false;}
+  const shown=drawRungs(approx.rungs,state);$('progress').textContent=`N = ${shown}`;
+  const x=36,y=830;ctx.save();ctx.fillStyle=colors().accent;ctx.font='44px "Noto Serif SC",serif';ctx.fillText(String(shown),x,y);const w=ctx.measureText(String(shown)).width;
+  ctx.fillStyle=colors().muted;ctx.font='19px "Noto Sans SC",sans-serif';ctx.fillText(t(`个旋转的圆 · 共 ${approx.total} 个`,`rotating circles · of ${approx.total}`),x+w+12,y);ctx.restore();
+  return true;
 }
 function render(){
   ctx.clearRect(0,0,900,900);if(!path.length)return;
   if(stage==='riddle'){renderRiddle();return;}
+  if(approx&&stage==='result'&&renderApprox())return;
   composition(ctx,stage==='result'?1:time);if(stage==='result')return;
   let tip;if(mode==='xy'){const X=drawChain(activeX,topChain),Y=drawChain(activeY,leftChain,Math.PI/2);tip={x:X.x,y:Y.y};ctx.strokeStyle=colors().accent+'70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=colors().text;ctx.font=`${Math.max(26,12*900/canvas.getBoundingClientRect().width)}px "Noto Serif SC",serif`;ctx.textAlign='right';ctx.fillText('X · x(t)',210,180);ctx.textAlign='center';ctx.save();ctx.translate(34,530);ctx.rotate(-Math.PI/2);ctx.fillText('Y · y(t)',0,0);ctx.restore();ctx.textAlign='left';}else tip=drawChain(active,{x:plot.x,y:plot.y});
   ctx.fillStyle=colors().accent;ctx.beginPath();ctx.arc(tip.x,tip.y,2.6,0,Math.PI*2);ctx.fill();
@@ -285,7 +309,7 @@ new ResizeObserver(resizeShared).observe(canvas);
 narrow.addEventListener('change',()=>{if(path.length&&!demo)previewFormula();});
 function frame(now){
   const dt=last?Math.min((now-last)/1000,.08):0;last=now;if(shared)resizeShared();
-  if(!busy&&active.length&&playing&&(stage==='drawing'||stage==='landing')){time=Math.min(1,time+(reduced.matches?1:dt/22));drawTrail(Math.floor(time*7200));if(time===1){if(demo){if(!reduced.matches)reset(true);}else finish();}}
+  if(!busy&&active.length&&playing&&(stage==='drawing'||stage==='landing')){clock=Math.min(1,clock+(reduced.matches?1:dt/DRAW_SECONDS));time=drawWarp(clock);drawTrail(Math.floor(time*7200));if(time===1){if(demo){if(!reduced.matches)reset(true);}else finish();}}
   if(stage!=='riddle'){$('progress').textContent=`${String(Math.round(time*100)).padStart(2,'0')}%`;$('drawing-progress').value=time;}if(!busy)render();renderMatte(now);requestAnimationFrame(frame);
 }
 function download(surface,name){const a=document.createElement('a');a.download=name;a.href=surface.toDataURL('image/png');a.click();}
@@ -343,7 +367,7 @@ $('shared-terms').addEventListener('input',()=>{if(!shared)return;const selected
 $('download').addEventListener('click',()=>{if(sketchPending)return;const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);composition(out,1,true);download(output,t('我的傅里叶画像.png','my-fourier-portrait.png'));});
 $('open-card').addEventListener('click',()=>{$('card-dialog').showModal();createCard();});
 $('make-formula-card').addEventListener('click',()=>{$('card-type').value='formula';updateUI();$('card-dialog').showModal();createCard();});$('close-card').addEventListener('click',()=>$('card-dialog').close());
-for(const id of ['card-name','card-format','card-type','card-hint'])$(id).addEventListener('change',()=>{$('card-hint-row').hidden=!cardType()==='guess';createCard();});
+for(const id of ['card-name','card-format','card-type','card-hint'])$(id).addEventListener('change',()=>{$('card-hint-row').hidden=cardType()!=='guess';createCard();});
 $('include-full').addEventListener('change',()=>{if(!$('include-full').checked&&!fullShare){fullUploadController?.abort();fullUpload=null;}createCard();});
 $('save-card').addEventListener('click',()=>{if(cardSurface)download(cardSurface,t(`我的傅里叶公式-${$('card-format').value}.png`,`my-fourier-formula-${$('card-format').value}.png`));});
 async function copyLink(){if(!cardPayload)return;try{await navigator.clipboard.writeText(cardPayload.url);cardStatus=()=>t('分享链接已复制。','Share link copied.');}catch{$('share-url').focus();$('share-url').select();cardStatus=()=>t('请手动复制选中的链接。','Please copy the selected link.');}$('card-status').textContent=cardStatus();}
@@ -353,23 +377,35 @@ function qrSurface(url){
   const unit=Math.max(4,Math.ceil(220/(qr.getModuleCount()+8))),surface=document.createElement('canvas');surface.width=surface.height=(qr.getModuleCount()+8)*unit;
   drawCardQr(surface.getContext('2d'),qr,0,0,unit,'ink');return surface;
 }
+// From the card dialog the video ends on the card's QR; from the result page (no card yet) on a self-contained link — nothing is uploaded.
 async function saveVideo(){
-  if(!cardShareURL||videoController)return;
-  const controller=new AbortController(),button=$('save-video');videoController=controller;button.disabled=true;
-  const progress=value=>{cardStatus=()=>t(`正在录制绘制视频 ${Math.round(value*100)}% · 请保持页面在前台`,`Recording the drawing video ${Math.round(value*100)}% · Keep this page visible`);$('card-status').textContent=cardStatus();};
+  if(videoController||!path.length||sketchPending||processing)return;
+  const controller=new AbortController(),buttons=[$('save-video'),$('save-video-result')],fromDialog=$('card-dialog').open;videoController=controller;for(const b of buttons)b.disabled=true;
+  const say=value=>{if(fromDialog){cardStatus=value;$('card-status').textContent=value();}else{status=value;$('status').textContent=value();}};
+  const progress=value=>say(()=>t(`正在录制绘制视频 ${Math.round(value*100)}% · 请保持页面在前台`,`Recording the drawing video ${Math.round(value*100)}% · Keep this page visible`));
   try{
     progress(0);
-    const prep=prepareVideo({mode,chains:chains(),path,dimensions,sketch:sketchHasTone&&sketch&&!sketchPending?tintSketch(sketch,'ink'):null,qr:qrSurface(cardShareURL),name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),lang,palette:'ink'});
+    if(sketchHasTone&&!toneMap)toneMap=sketchTone();
+    const url=cardShareURL||encodePortrait({mode,chains:chains(),path,dimensions,toneMap,name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),palette:'ink'},SHARE_BASE).url;
+    const prep=prepareVideo({mode,chains:chains(),path,dimensions,sketch:sketchHasTone&&sketch&&!sketchPending?tintSketch(sketch,'ink'):null,qr:qrSurface(url),name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),lang,palette:'ink'});
     const blob=await recordVideo(prep,{onProgress:progress,signal:controller.signal}),mp4=blob.type==='video/mp4',file=new File([blob],t('我的傅里叶画像','my-fourier-portrait')+(mp4?'.mp4':'.webm'),{type:blob.type});
     if(narrow.matches&&navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file]});}catch(error){if(error.name!=='AbortError')throw error;}}
     else{const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-    cardStatus=()=>mp4?t('绘制视频已保存（MP4）。','Drawing video saved (MP4).'):t('已保存为 WebM。此浏览器无法录制 MP4；发微信或抖音请改用 Safari 或新版 Chrome。','Saved as WebM. This browser cannot record MP4; use Safari or a recent Chrome for WeChat or TikTok.');
-  }catch(error){cardStatus=error.name==='AbortError'?()=>t('视频录制已取消。','Video recording cancelled.'):()=>t('视频录制失败，请重试。','Video recording failed. Please retry.');}
-  finally{videoController=null;button.disabled=!cardPayload;$('card-status').textContent=cardStatus();}
+    say(()=>mp4?t('绘制视频已保存（MP4）。','Drawing video saved (MP4).'):t('已保存为 WebM。此浏览器无法录制 MP4；发微信或抖音请改用 Safari 或新版 Chrome。','Saved as WebM. This browser cannot record MP4; use Safari or a recent Chrome for WeChat or TikTok.'));
+  }catch(error){say(error.name==='AbortError'?()=>t('视频录制已取消。','Video recording cancelled.'):()=>t('视频录制失败，请重试。','Video recording failed. Please retry.'));}
+  finally{videoController=null;$('save-video').disabled=!cardPayload||!preferredVideoType();updateUI();}
 }
-$('save-video').addEventListener('click',saveVideo);
+$('save-video').addEventListener('click',saveVideo);$('save-video-result').addEventListener('click',saveVideo);$('approx').addEventListener('click',startApprox);
+// Video labels carry the real duration of the video timeline.
+$('save-video').dataset.zh=`↓ 保存绘制视频 MP4（${videoDuration()} 秒）`;$('save-video').dataset.en=`↓ Save drawing video MP4 (${videoDuration()} s)`;
+$('save-video-result').dataset.zh='↓ 保存绘制视频 MP4';$('save-video-result').dataset.en='↓ Save drawing video MP4'
 $('riddle-got').addEventListener('click',()=>{if(stage==='riddle')revealRiddle(recognisedAt(riddle.rungs,riddleNow()));});
 $('riddle-give-up').addEventListener('click',()=>revealRiddle(null));
+// Seal reveal: the stamp lands on the line drawing, then the sketch develops, the name and the CTA follow (CSS delays).
+$('riddle-seal').addEventListener('click',()=>{
+  if(stage!=='riddle')return;$('riddle-seal').disabled=true;const stamp=$('reveal-stamp');stamp.hidden=false;document.body.classList.add('sealed');
+  setTimeout(()=>{$('riddle-seal').disabled=false;revealRiddle(null);},reduced.matches?0:650);
+});
 $('riddle-save').addEventListener('click',async()=>{
   if(!riddle||riddleScore===undefined)return;
   try{
