@@ -1,8 +1,9 @@
+import {darknessFromSurface,prepareWaves,waveFrame,drawWaveInset} from './wave.mjs';
 import {drawInk,inkProfile} from './ink.mjs';
 // 9:16 drawing video that shows what a Fourier series *is*, not just the result:
 //   A  draw   — XY epicycle chains trace the portrait (every line is a sum of circles)
 //   B  ladder — the same curve rebuilt with 2 → 4 → … → N circles (low frequencies shape, high ones detail)
-//   C  reveal — the sketch develops under the lines, then the name (skipped in guessing mode)
+//   C  reveal — the tones develop as a 2D Fourier series (plane waves, low → high), then the name (skipped in guessing mode)
 //   D  end    — short QR + call to action
 import {xyLayout,axisEnvelope} from './fourier.mjs';
 import {canonicalFormula,formulaLines,frequencyLadder} from './formula.mjs';
@@ -10,7 +11,7 @@ import {ladderRungs,portraitCurve,trimLadder} from './ladder.mjs';
 import {getPalette} from './palettes.mjs';
 
 export const VIDEO_SIZE={width:720,height:1280};
-export const VIDEO_TIMELINE=[['draw',7.5],['ladder',4],['reveal',2],['end',2.5]];
+export const VIDEO_TIMELINE=[['draw',7.5],['ladder',4],['reveal',4],['end',2.5]];
 export const videoDuration=()=>VIDEO_TIMELINE.reduce((s,[,d])=>s+d,0);
 
 // Which act a time falls in and the local progress 0..1 inside it.
@@ -37,7 +38,8 @@ export function prepareVideo({mode,chains,path,dimensions,sketch=null,qr=null,na
   const layout=mode==='xy'?xyLayout(dimensions,axisEnvelope(chains.x),axisEnvelope(chains.y)):{plot:{x:450,y:450,scale:590/Math.max(dimensions.width,dimensions.height)}};
   // After the chains have drawn, the camera moves in: the portrait alone, centred and larger.
   const focus={x:450,y:430,scale:800/Math.max(dimensions.width,dimensions.height)};
-  return {mode,chains,path,dimensions,sketch,qr,name,guess,hint,lang,colors:getPalette(palette),trail,trailInk,samples,ladder,layout,focus,total,formula:formulaLines(formula,2)};
+  const waves=sketch&&!guess?(()=>{const d=darknessFromSurface(sketch);return prepareWaves(d.darkness,d.width,d.height);})():null;
+  return {waves,wavesCache:{},mode,chains,path,dimensions,sketch,qr,name,guess,hint,lang,colors:getPalette(palette),trail,trailInk,samples,ladder,layout,focus,total,formula:formulaLines(formula,2)};
 }
 
 const t=(prep,zh,en)=>prep.lang==='zh'?zh:en;
@@ -96,14 +98,19 @@ export function drawVideoFrame(ctx,prep,time){
     caption=t(prep,'低频定轮廓，高频添细节','Low frequencies shape. High ones add detail.');
     detail=t(prep,`${shown.n} 个圆 · 保留 ${(shown.energy*100).toFixed(1)}% 能量`,`${shown.n} circles · ${(shown.energy*100).toFixed(1)}% of the energy`);
   }else{
-    const reveal=phase.name==='reveal'?ease(phase.progress):1;
+    // 2D Fourier: plane waves from low to high frequency over the first 80% of the act, then hold.
+    const reveal=phase.name==='reveal'?clamp01(phase.progress/.8):1;let level=null;
     if(prep.sketch&&!prep.guess){
-      const w=prep.dimensions.width*plot.scale,h=prep.dimensions.height*plot.scale;
-      ctx.globalAlpha=reveal;ctx.globalCompositeOperation='multiply';ctx.drawImage(prep.sketch,plot.x-w/2,plot.y-h/2,w,h);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+      const w=prep.dimensions.width*plot.scale,h=prep.dimensions.height*plot.scale,frame=prep.waves&&reveal<1?waveFrame(prep.waves,reveal,[1,3,5].map(i=>parseInt(colors.line.slice(i,i+2),16)),prep.wavesCache):null;
+      level=frame?.level;ctx.globalCompositeOperation='multiply';ctx.drawImage(frame?frame.surface:prep.sketch,plot.x-w/2,plot.y-h/2,w,h);ctx.globalCompositeOperation='source-over';
     }
     ctx.strokeStyle=colors.line;ctx.globalAlpha=prep.sketch&&!prep.guess?1-.65*reveal:1;drawInk(ctx,prep.trail,prep.trailInk,map,{width:2.4});ctx.globalAlpha=1;
     caption=prep.guess?t(prep,'猜猜我是谁？','Guess who?')+(prep.hint?t(prep,` 提示：${prep.hint}`,` Hint: ${prep.hint}`):''):prep.name?t(prep,`${prep.name}，原来圆周记得你`,`${prep.name} — the circles remember`):t(prep,'原来，圆周记得你','The circles remember you');
     detail=t(prep,`${prep.total} 个旋转的圆 · 一个公式`,`${prep.total} rotating circles · one formula`);
+    if(level){
+      caption=t(prep,'明暗由二维波叠成','Tones are made of 2D waves');detail=t(prep,`二维傅里叶 · 已叠加 ${level.waves.toLocaleString('zh-CN')} 个平面波`,`2D Fourier · ${level.waves.toLocaleString('en')} plane waves`);
+      ctx.setTransform(1,0,0,1,0,0);drawWaveInset(ctx,level.wave,width-48-96,OY+8,96,colors);ctx.translate(0,OY);ctx.scale(S,S);
+    }
   }
   ctx.setTransform(1,0,0,1,0,0);
   // footer

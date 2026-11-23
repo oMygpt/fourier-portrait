@@ -10,6 +10,7 @@ import {prepareRiddle,riddleState,recognisedAt,scoreText} from './riddle.mjs';
 import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 import {drawInk,inkProfile} from './ink.mjs';
+import {DEVELOP_SECONDS,darknessFromSurface,prepareWavesAsync,waveFrame,drawWaveInset} from './wave.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
 import {featureRegions} from './portrait-preprocess.mjs';
@@ -27,6 +28,7 @@ const narrow=matchMedia('(max-width:650px)');
 let lang=initialLanguage(),palette='ink',mode='xy',stage='landing',generation=0,shared=false,demo=true;
 let path=[],coefficients=[],xCoefficients=[],yCoefficients=[],active=[],activeX=[],activeY=[],automatic=null,bounds=null;
 let dimensions={width:360,height:360},plot={x:450,y:450,scale:1},topChain={},leftChain={};
+let waves=null,wavesSource=null,wavesController=null,wavesCache={},developStart=0;
 let picture=null,sketch=null,tinted=null,sketchPending=false,sketchArrived=0,lateSketch=null,installed=0,pathWorker=null;
 let toneMap=null,toneSurface=null,sketchHasTone=false;
 let fullShare=null,fullUpload=null,fullUploadController=null,sharedReference=null,sharedFull=null,fullArrived=0,fullState='none';
@@ -92,7 +94,7 @@ function acceptSketch(data,token){
   if(token!==generation)return;
   lateSketch=data;if(installed!==token)return;
   sketchPending=false;
-  if(data.sketch){sketch=graySurface(data.sketch);tinted=null;toneMap=null;sketchHasTone=true;sketchArrived=performance.now();}
+  if(data.sketch){sketch=graySurface(data.sketch);tinted=null;toneMap=null;sketchHasTone=true;sketchArrived=developStart=performance.now();}
   status=()=>data.sketch?t('素描与公式均已就绪 · 全程本地','Sketch and formula ready · Entirely local'):t('素描暂不可用，已保留圆周轮廓','Sketch unavailable. Your Fourier contours are preserved.');
   setProcessing(false);
 }
@@ -159,7 +161,7 @@ async function loadImage(src,name,isDemo=false,id=''){
     if(token!==generation)return;picture=image;updateUI();
     const result=await prepare(image,id,token);if(token!==generation)return;
     ({path,coefficients,dimensions,automatic,bounds}=result);xCoefficients=result.x;yCoefficients=result.y;strokeCount=result.strokes.length;mode='xy';manual=false;
-    sketch=result.sketch;tinted=null;sketchPending=Boolean(result.sketchPending);sketchHasTone=result.hasTone;sketchArrived=0;installed=token;
+    sketch=result.sketch;tinted=null;sketchPending=Boolean(result.sketchPending);sketchHasTone=result.hasTone;sketchArrived=developStart=0;installed=token;
     $('terms').max=String(Math.max(xCoefficients.length,yCoefficients.length));
     status=()=>result.classic?t('模型不可用 · 已使用经典算法','Models unavailable · Using the classic algorithm'):t(`${strokeCount} 条笔画 · 公式已就绪 · 全程本地`,`${strokeCount} strokes · Formula ready · Entirely local`);
     reset(isDemo);busy=false;
@@ -207,13 +209,33 @@ function drawSharedPortrait(){
   const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio,palette);ink.clearRect(0,0,900,900);ink.strokeStyle=portraitInk(palette).color;
   drawInk(ink,strokes,inkProfile(strokes),p=>p,{width:style.width*1.1});drawn=7200;
 }
+// Tones develop as a 2D Fourier series (low → high spatial frequency) instead of fading in.
+function ensureWaves(surface){
+  if(wavesSource!==surface){
+    wavesSource=surface;waves=null;wavesCache={};wavesController?.abort();
+    const controller=new AbortController(),{darkness,width,height}=darknessFromSurface(surface);wavesController=controller;
+    prepareWavesAsync(darkness,width,height,{signal:controller.signal}).then(result=>{if(wavesSource===surface)waves=result;}).catch(()=>{});
+  }
+  return waves;
+}
+function drawWaveCaption(level){
+  const size=72,x=36,y=800;ctx.save();
+  drawWaveInset(ctx,level.wave,x,y,size,colors());ctx.strokeStyle=colors().line+'55';ctx.lineWidth=1;ctx.strokeRect(x+.5,y+.5,size-1,size-1);
+  ctx.fillStyle=colors().text;ctx.font='19px "Noto Serif SC",serif';ctx.fillText(t('二维傅里叶 · 明暗由波叠成','2D Fourier · tones made of waves'),x+size+14,y+30);
+  ctx.fillStyle=colors().muted;ctx.font='16px "Noto Sans SC",sans-serif';ctx.fillText(t(`已叠加 ${level.waves.toLocaleString('zh-CN')} 个平面波`,`${level.waves.toLocaleString('en')} plane waves so far`),x+size+14,y+58);
+  ctx.restore();
+}
 function composition(context,progress,complete=false){
   const visible=shared?Boolean(toneSurface||sharedFull):sketch&&!sketchPending,arrival=!shared&&sketchArrived&&!reduced.matches&&!complete?Math.min(1,(performance.now()-sketchArrived)/1200):1,fade=sharedFull?(reduced.matches||complete?1:Math.min(1,(performance.now()-fullArrived)/1200)):0;
   if(visible){
     if(!shared&&!tinted)tinted=tintSketch(sketch,palette);
-    const base=shared?toneSurface:tinted,w=dimensions.width*plot.scale,h=dimensions.height*plot.scale;
-    if(base){context.globalAlpha=sketchReveal(progress)*arrival*(1-fade);drawSketch(context,base,plot.x-w/2,plot.y-h/2,w,h,palette);}
-    if(sharedFull){context.globalAlpha=sketchReveal(progress)*fade;drawSketch(context,sharedFull,plot.x-w/2,plot.y-h/2,w,h,palette);}
+    const base=shared?sharedFull||toneSurface:tinted,w=dimensions.width*plot.scale,h=dimensions.height*plot.scale,x=plot.x-w/2,y=plot.y-h/2;
+    const timed=sketchReveal(progress),started=developStart?Math.min(1,(performance.now()-developStart)/1000/DEVELOP_SECONDS):1,p=complete||reduced.matches?1:Math.min(timed,started);
+    // Visitors: the coarse tones in the link hand over to the full sketch as it develops.
+    if(shared&&sharedFull&&toneSurface&&p<1){context.globalAlpha=(1-p)*timed;drawSketch(context,toneSurface,x,y,w,h,palette);}
+    const developing=p>0&&p<1?ensureWaves(base):null;
+    if(developing){const frame=waveFrame(developing,p,[1,3,5].map(i=>parseInt(colors().line.slice(i,i+2),16)),wavesCache);context.globalAlpha=1;drawSketch(context,frame.surface,x,y,w,h,palette);if(context===ctx)drawWaveCaption(frame.level);}
+    else{context.globalAlpha=p;drawSketch(context,base,x,y,w,h,palette);}
   }
   context.globalAlpha=visible?(shared?1-.65-.17*fade:1-.82*arrival):1;context.drawImage(trail,0,0,900,900);context.globalAlpha=1;
 }
@@ -227,7 +249,7 @@ function startRiddle(){
   stage='riddle';document.body.dataset.stage=stage;layout();ink.clearRect(0,0,900,900);updateUI();
 }
 function revealRiddle(n){
-  if(stage!=='riddle')return;riddleScore=n;fullArrived=performance.now();finish();
+  if(stage!=='riddle')return;riddleScore=n;fullArrived=developStart=performance.now();finish();
 }
 function riddleNow(){return riddleState((performance.now()-riddleStart)/1000,riddle.rungs.length);}
 function renderRiddle(){
@@ -367,7 +389,7 @@ async function loadFullSketch(reference){
   try{
     const blob=await fetchSketch(reference),image=await createImageBitmap(blob);
     if(image.width>1024||image.height>1024){image.close();throw new Error('Sketch too large');}
-    sharedFull=tintSketch(image,palette);image.close();fullArrived=performance.now();fullState='ready';
+    sharedFull=tintSketch(image,palette);image.close();fullArrived=developStart=performance.now();fullState='ready';
   }catch{fullState='fallback';}
   updateUI();
 }
@@ -413,7 +435,7 @@ async function loadBundleShared(){
     automatic={complex:{count:pick(a,coefficients)},x:{count:pick(a,xCoefficients)},y:{count:pick(b,yCoefficients)}};bounds=null;
     const total=mode==='xy'?xCoefficients.length+yCoefficients.length:coefficients.length;$('shared-terms').max=String(Math.max(1,total));$('shared-terms').disabled=total<2;
     status=()=>t('完整精度公式 + 本地解密的素描 · 无原始照片','Full-precision formula + locally decrypted sketch · No original photo');
-    fullArrived=performance.now();fullState='ready';busy=false;reset();resizeShared();if(sharedGuess)startRiddle();
+    fullArrived=performance.now();developStart=0;fullState='ready';busy=false;reset();resizeShared();if(sharedGuess)startRiddle();
   }catch{
     busy=false;fullState='fallback';sharedReference=null;status=()=>'';
     errorText=()=>t('这张二维码指向的画像已过期或暂时无法获取。可以向分享者要文字链接，过期后它仍能画出线条。','This QR points to a portrait that has expired or is unavailable. Ask the sender for the text link; it still draws the lines after expiry.');updateUI();

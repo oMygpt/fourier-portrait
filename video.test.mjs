@@ -4,7 +4,7 @@ import {videoPhase,videoDuration,ladderLevels,trimLadder,preferredVideoType,prep
 import {realDft} from './fourier.mjs';
 
 test('video timeline: four acts in order, clamped at both ends',()=>{
-  assert.equal(videoDuration(),16);assert.deepEqual(VIDEO_TIMELINE.map(([n])=>n),['draw','ladder','reveal','end']);
+  assert.equal(videoDuration(),18);assert.deepEqual(VIDEO_TIMELINE.map(([n])=>n),['draw','ladder','reveal','end']);
   assert.deepEqual(videoPhase(0),{name:'draw',progress:0});assert.equal(videoPhase(7.6).name,'ladder');assert.equal(videoPhase(12).name,'reveal');
   assert.deepEqual(videoPhase(99),{name:'end',progress:1});assert.equal(videoPhase(-1).progress,0);
 });
