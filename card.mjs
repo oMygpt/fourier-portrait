@@ -1,7 +1,10 @@
-import {drawSketch,tintSketch} from './sketch.mjs';
+import {drawSketch} from './sketch.mjs';
+import {samplePortrait,closeStrokeSeams} from './portrait-render.mjs';
+import {limitChains} from './portrait.mjs';
+import {scoreCopy} from './riddle.mjs';
+import {axisTerms,expression,expressionParts,canonicalFormula,formulaLines} from './formula.mjs';
 import {shareQrSegments} from './share.mjs';
 import {getPalette} from './palettes.mjs';
-import {fourierExample} from './samples/fourier-formula.mjs';
 
 export const CARD_GOLD=getPalette('ink').line,CARD_NIGHT=getPalette('ink').background;
 
@@ -15,38 +18,43 @@ export function drawCardQr(ctx,qr,x,y,unit=4,palette='ink'){
   ctx.restore();return extent;
 }
 
-function numericTerms(values,real){
-  const grouped=new Map();
-  for(const c of values){
-    if(![c.k,c.amplitude,c.phase].every(Number.isFinite)||c.amplitude<0)throw new RangeError('Invalid coefficient');
-    const k=real?Math.abs(c.k):c.k,phase=real&&c.k<0?-c.phase:c.phase,p=grouped.get(k)||{k,re:0,im:0};
-    p.re+=c.amplitude*Math.cos(phase);p.im+=c.amplitude*Math.sin(phase);grouped.set(k,p);
-  }
-  const terms=[...grouped.values()].map(c=>({...c,amplitude:Math.hypot(c.re,c.im),phase:Math.atan2(c.im,c.re)})).sort((a,b)=>b.amplitude-a.amplitude);
-  const n=v=>String(Number(v.toPrecision(3))),sign=v=>v<0?'−':'+';
-  return terms.map(c=>real?(c.k?`${n(c.amplitude)} cos(${c.k===1?'2':2*c.k}πt ${sign(c.phase)} ${n(Math.abs(c.phase))})`:n(c.re)):`(${n(c.re)} ${sign(c.im)} ${n(Math.abs(c.im))}i) e⁽²πⁱ·${c.k}ᵗ⁾`);
-}
-
 export function numericExcerpt(values,real=true){
-  const terms=numericTerms(values,real);
-  return (terms.slice(0,2).join(' + ')||'0').replaceAll('+ −','− ')+(terms.length>2?' + ⋯':'');
+  return expression(axisTerms(values,real),{real,limit:2});
 }
 
-export function cardCopy({mode,chains,name='',guess=false,lang='en',toneMap=null,encryptedSketch=null}){
-  const zh=lang==='zh',groups=mode==='xy'?[['x',chains.x],['y',chains.y]]:[['z',chains.complex]];
+export function cardCopy({mode,chains,name='',guess=false,hint='',lang='en',toneMap=null,encryptedSketch=null}){
+  const zh=lang==='zh',formula=canonicalFormula(mode,chains),total=formula.circles,who=!guess&&name?name:(zh?'我':'Me');
   return {
     title:zh?'我的傅里叶公式':'My Fourier Formula',
-    cta:zh?['扫码，看它画出我。']:['Scan to watch','it draw me.'],
-    privacy:zh?['原始照片不上传',encryptedSketch?'素描端到端加密 · 30 天':toneMap?'分享公式与素描明暗':'只分享公式']:['Original photo stays local.',encryptedSketch?'Sketch encrypted · 30 days.':toneMap?'Formula + sketch tones.':'Only the formula is shared.'],
+    headline:zh?`${who} = ${total} 个旋转的圆`:`${who} = ${total} rotating circles`,
+    teaser:guess?(zh?'猜猜我是谁？':'Guess who?')+(hint?(zh?`  提示：${hint}`:`  Hint: ${hint}`):''):(zh?'每一笔，都是圆的回声。':'Every line is an echo of circles.'),
+    spectrum:zh?'频谱指纹 · 这串频率只属于这张脸':'Spectral fingerprint · these frequencies belong to one face',
+    cta:zh?[guess?'扫码揭晓，看它画出我。':'扫码，看它画出我。']:guess?['Scan to find out','as it draws me.']:['Scan to watch','it draw me.'],
+    privacy:zh?['原始照片不上传',encryptedSketch?'素描与公式端到端加密 · 30 天':toneMap?'分享公式与素描明暗':'只分享公式']:['Original photo stays local.',encryptedSketch?'Sketch encrypted · 30 days.':toneMap?'Formula + sketch tones.':'Only the formula is shared.'],
     example:zh?'傅里叶的公式 → 傅里叶':'Fourier’s formula → Fourier',
     mystery:zh?'我的公式 → ?':'My formula → ?',
     nickname:!guess?name:'',
-    equations:groups.map(([axis,values])=>{
-      const terms=numericTerms(values,axis!=='z'),lines=[`= ${terms[0]||'0'}`];
-      if(terms.length>1)lines.push(`+ ${terms[1]}${terms.length>2?' + ⋯':''}`.replace('+ −','− '));
-      return {axis,text:numericExcerpt(values,axis!=='z'),lines,terms:zh?`… 共 ${values.length} 项`:`… ${values.length} ${values.length===1?'term':'terms'}`};
-    })
+    equations:formulaLines(formula,2).map(({axis,text,parts,more,terms})=>({axis,text,lines:[`= ${parts[0]??'0'}`,...(parts.length>1?[parts.slice(1).join(' ')+(more?' + ⋯':'')]:[])],terms:zh?`… 共 ${terms} 项`:`… ${terms} ${terms===1?'term':'terms'}`}))
   };
+}
+
+// The hero never shows the face in guessing mode: only a 16-circle silhouette.
+export const cardHero=({guess=false,sketch=null})=>guess?'silhouette':sketch?'portrait':'lines';
+export const SILHOUETTE_CIRCLES=16;
+
+// |coefficient| per frequency k (conjugate pairs merged), per axis — a per-portrait "fingerprint".
+export function spectrumBars(mode,chains,count=144){
+  const axes=mode==='xy'?[chains.x,chains.y]:[chains.complex],bars=axes.map(()=>new Float64Array(count));
+  axes.forEach((values,a)=>{for(const c of values){const k=Math.abs(c.k);if(k>=1&&k<=count&&Number.isFinite(c.amplitude))bars[a][k-1]+=c.amplitude;}});
+  const max=Math.max(1e-12,...bars.flatMap(b=>[...b]));
+  return bars.map(b=>Array.from(b,v=>Math.log1p(200*v/max)/Math.log1p(200)));
+}
+
+// Short, stable edition number derived from the formula itself.
+export function editionNumber(mode,chains){
+  let h=2166136261;
+  for(const c of [...(mode==='xy'?[...chains.x,...chains.y]:chains.complex)].slice(0,64)){for(const v of [c.k,Math.round(c.amplitude*100),Math.round(c.phase*100)]){h^=v&0xffff;h=Math.imul(h,16777619);h^=v>>>16;h=Math.imul(h,16777619);}}
+  return String((h>>>0)%100000).padStart(5,'0');
 }
 
 function mathLine(ctx,text,x,y,width,size){
@@ -55,35 +63,150 @@ function mathLine(ctx,text,x,y,width,size){
   ctx.translate(x+left*scale,y);ctx.scale(scale,scale);ctx.fillText(text,0,0);ctx.restore();
 }
 
-export function renderSocialCard({mode,chains,teaser=null,name='',guess=false,shareURL,lang='en',toneMap=null,encryptedSketch=null},format='34'){
+// Short pointers get stronger error correction and larger modules; long self-contained links stay at 4px modules.
+function drawShareQr(ctx,url,right,bottom,size){
+  const short=url.includes('#s'),qr=window.qrcode(0,short?'Q':'L');for(const segment of shareQrSegments(url))qr.addData(segment.data,segment.mode);qr.make();
+  const modules=qr.getModuleCount(),unit=short?Math.max(4,Math.floor(size/(modules+8))):4,extent=(modules+8)*unit,top=bottom-extent;drawCardQr(ctx,qr,right-extent,top,unit);
+  return {modules,top,extent};
+}
+
+function drawLens(ctx,cx,cy,R,colors){
+  ctx.save();ctx.strokeStyle=colors.line+'40';ctx.lineWidth=1;
+  for(const r of [R,R+16]){ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.stroke();}
+  for(let i=0;i<120;i++){const a=i/120*2*Math.PI,long=i%10===0,r0=R+16,r1=R+16+(long?14:6);ctx.strokeStyle=long?colors.accent+'99':colors.line+'40';ctx.beginPath();ctx.moveTo(cx+r0*Math.cos(a),cy+r0*Math.sin(a));ctx.lineTo(cx+r1*Math.cos(a),cy+r1*Math.sin(a));ctx.stroke();}
+  ctx.restore();
+}
+
+function drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch,guess,colors}){
+  const hero=cardHero({guess,sketch}),scale=2*R*.84/Math.max(dimensions.width,dimensions.height),map=p=>({x:cx+p.x*scale,y:cy+p.y*scale});
+  drawLens(ctx,cx,cy,R,colors);
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,R-3,0,2*Math.PI);ctx.clip();ctx.lineCap=ctx.lineJoin='round';
+  if(hero==='portrait'){const w=dimensions.width*scale,h=dimensions.height*scale;drawSketch(ctx,sketch,cx-w/2,cy-h/2,w,h,'ink');}
+  const shown=hero==='silhouette'?limitChains(mode,chains,SILHOUETTE_CIRCLES):chains;
+  const points=closeStrokeSeams(samplePortrait(mode,shown,path,Math.max(4000,path.length*2)),12);
+  ctx.strokeStyle=colors.line;ctx.globalAlpha=hero==='portrait'?.42:1;ctx.lineWidth=hero==='silhouette'?3:2.4;ctx.beginPath();
+  points.forEach((p,i)=>{const q=map(p);if(!i||hero!=='silhouette'&&!p.draw)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();ctx.globalAlpha=1;
+  ctx.restore();
+  if(hero==='silhouette'){ctx.fillStyle=colors.accent;ctx.fillRect(cx+R*.62,cy-R*.92,86,86);ctx.fillStyle=colors.background;ctx.font='64px "Noto Serif SC",serif';ctx.textAlign='center';ctx.fillText('?',cx+R*.62+43,cy-R*.92+66);ctx.textAlign='left';}
+}
+
+function drawSpectrum(ctx,bars,x,y,width,height,colors){
+  const count=bars[0].length,step=width/count,half=bars.length>1?height/2:height,base=bars.length>1?y+half:y+height;
+  ctx.save();ctx.fillStyle=colors.line;
+  bars.forEach((values,axis)=>values.forEach((v,i)=>{const h=Math.max(1,v*(half-4));ctx.globalAlpha=.35+.65*v;ctx.fillRect(x+i*step,axis?base+2:base-h-2,Math.max(1,step*.62),h);}));
+  ctx.globalAlpha=1;ctx.strokeStyle=colors.accent+'88';ctx.beginPath();ctx.moveTo(x,base);ctx.lineTo(x+width,base);ctx.stroke();ctx.restore();
+}
+
+export function renderSocialCard({mode,chains,path,dimensions,sketch=null,name='',guess=false,hint='',shareURL,lang='en',toneMap=null,encryptedSketch=null,date=new Date()},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
-  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',band=h-444,colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,lang,toneMap,encryptedSketch});
+  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',colors=getPalette('ink'),copy=cardCopy({mode,chains,name,guess,hint,lang,toneMap,encryptedSketch}),zh=lang==='zh';
   ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
-  for(let i=0;i<22000;i++){const y=i*i*137%h;if(y>band-28)continue;ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,y,1,1);}
+  for(let i=0;i<26000;i++){ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,i*i*137%h,1,1);}
   ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
-  ctx.fillStyle=colors.accent;ctx.fillRect(88,66,48,64);ctx.fillStyle=colors.background;ctx.textAlign='center';ctx.font='24px "Noto Serif SC",serif';ctx.fillText('圆',112,92);ctx.fillText('周',112,120);ctx.textAlign='left';
-  ctx.fillStyle=colors.muted;ctx.font='22px sans-serif';ctx.fillText(lang==='zh'?'圆周之间 / 001':'FOURIER PORTRAIT / 001',160,106);
-  ctx.fillStyle=colors.text;ctx.font='60px "Noto Serif SC",serif';ctx.fillText(copy.title,88,tall?228:210);
-  ctx.fillStyle=colors.muted;ctx.font='26px "Noto Serif SC",serif';ctx.fillText(copy.nickname,90,tall?278:256);
-  ctx.strokeStyle=colors.accent+'55';ctx.beginPath();ctx.moveTo(88,tall?320:280);ctx.lineTo(992,tall?320:280);ctx.stroke();
-  const first=tall?440:340,gap=tall?245:180;
-  copy.equations.forEach(({axis,lines,terms},i)=>{
-    const y=first+i*gap;
-    ctx.fillStyle=colors.line;mathLine(ctx,`${axis}(t)`,88,y,180,70);
-    lines.forEach((line,j)=>mathLine(ctx,line,304,y+j*62,688,52));
-    ctx.fillStyle=colors.accent;ctx.font='24px "Noto Serif SC",serif';ctx.fillText(terms,308,y+106);
-  });
-  const exampleTop=tall?950:660,exampleHeight=tall?410:254;
-  ctx.strokeStyle=colors.line+'33';ctx.strokeRect(88.5,exampleTop+.5,903,exampleHeight);
-  ctx.fillStyle=colors.muted;ctx.font='26px "Noto Serif SC",serif';ctx.fillText(copy.example,112,exampleTop+48);
-  ctx.fillStyle=colors.line;
-  for(const [i,axis] of ['x','y'].entries())mathLine(ctx,`${axis}(t) = ${numericExcerpt([fourierExample[axis]])} + ⋯`,112,exampleTop+(tall?130:112)+i*48,540,28);
-  ctx.fillStyle=colors.accent;ctx.font='38px "Noto Serif SC",serif';ctx.fillText(copy.mystery,112,exampleTop+exampleHeight-34);
-  if(teaser){const surface=tintSketch(teaser,'ink'),scale=Math.min(300/surface.width,(exampleHeight-24)/surface.height),w=surface.width*scale,h=surface.height*scale;drawSketch(ctx,surface,978-w,exampleTop+(exampleHeight-h)/2,w,h,'ink');}
-  ctx.strokeStyle=colors.accent+'55';ctx.beginPath();ctx.moveTo(72,band-28);ctx.lineTo(1008,band-28);ctx.stroke();
-  const qr=window.qrcode(0,'L');for(const segment of shareQrSegments(shareURL))qr.addData(segment.data,segment.mode);qr.make();
-  const modules=qr.getModuleCount(),extent=(modules+8)*4;drawCardQr(ctx,qr,1008-extent,h-56-extent,4);
-  ctx.fillStyle=colors.text;ctx.font='38px "Noto Serif SC",serif';copy.cta.forEach((line,i)=>ctx.fillText(line,88,band+118+i*52));
-  ctx.fillStyle=colors.muted;ctx.font='24px "Noto Serif SC",serif';copy.privacy.forEach((line,i)=>ctx.fillText(line,88,band+294+i*36));
+  // header: seal · series · edition · date
+  ctx.fillStyle=colors.accent;ctx.fillRect(88,72,48,64);ctx.fillStyle=colors.background;ctx.textAlign='center';ctx.font='24px "Noto Serif SC",serif';ctx.fillText('圆',112,98);ctx.fillText('周',112,126);ctx.textAlign='left';
+  ctx.fillStyle=colors.muted;ctx.font='22px "Noto Serif SC",serif';ctx.fillText(zh?'圆周之间 · 傅里叶画像':'FOURIER PORTRAIT',160,100);
+  ctx.font='20px "Noto Sans SC",sans-serif';ctx.fillText(`N° ${editionNumber(mode,chains)}  ·  ${date.getFullYear()}.${String(date.getMonth()+1).padStart(2,'0')}.${String(date.getDate()).padStart(2,'0')}`,160,128);
+  // hero lens
+  const R=tall?390:268,cy=tall?640:438;
+  drawHero(ctx,{cx:540,cy,R,mode,chains,path,dimensions,sketch,guess,colors});
+  // headline + teaser + formula
+  let y=cy+R+(tall?130:96);
+  ctx.fillStyle=colors.text;ctx.textAlign='center';ctx.font=`${tall?62:54}px "Noto Serif SC",serif`;ctx.fillText(copy.headline,540,y);
+  ctx.fillStyle=colors.accent;ctx.font='28px "Noto Serif SC",serif';ctx.fillText(copy.teaser,540,y+(tall?62:50));ctx.textAlign='left';
+  y+=tall?130:100;ctx.fillStyle=colors.muted;
+  copy.equations.forEach(({axis,text},i)=>mathLine(ctx,`${axis}(t) = ${text}`,88,y+i*40,904,26));
+  // spectral fingerprint
+  y+=copy.equations.length*40+(tall?40:16);
+  drawSpectrum(ctx,spectrumBars(mode,chains),88,y,904,tall?110:70,colors);
+  ctx.fillStyle=colors.muted;ctx.font='18px "Noto Serif SC",serif';ctx.fillText(copy.spectrum,88,y+(tall?140:96));
+  // footer: CTA + QR
+  const {modules,top}=drawShareQr(ctx,shareURL,1008,h-56,tall?270:230);
+  ctx.fillStyle=colors.text;ctx.font='38px "Noto Serif SC",serif';copy.cta.forEach((line,i)=>ctx.fillText(line,88,top+64+i*50));
+  ctx.fillStyle=colors.accent;ctx.font='24px "Noto Sans SC",sans-serif';ctx.fillText('fourier.jupyter.pro',88,top+64+copy.cta.length*50+10);
+  ctx.fillStyle=colors.muted;ctx.font='20px "Noto Serif SC",serif';copy.privacy.forEach((line,i)=>ctx.fillText(line,88,h-112+i*30));
   return {canvas:card,qrVersion:(modules-17)/4};
+}
+
+// Riddle score card: a 16-circle silhouette, the score and a QR back to the same riddle. No name, no face.
+export function renderScoreCard({mode,chains,path,dimensions,n,total,hint='',shareURL,lang='zh'}){
+  const card=document.createElement('canvas');card.width=1080;card.height=1440;
+  const ctx=card.getContext('2d'),h=card.height,colors=getPalette('ink'),copy=scoreCopy(n,total,lang),zh=lang==='zh';
+  ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
+  for(let i=0;i<26000;i++){ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,i*i*137%h,1,1);}
+  ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
+  ctx.fillStyle=colors.accent;ctx.fillRect(88,72,48,64);ctx.fillStyle=colors.background;ctx.textAlign='center';ctx.font='24px "Noto Serif SC",serif';ctx.fillText('圆',112,98);ctx.fillText('周',112,126);ctx.textAlign='left';
+  ctx.fillStyle=colors.muted;ctx.font='22px "Noto Serif SC",serif';ctx.fillText(zh?'圆周之间 · 猜猜我是谁':'FOURIER PORTRAIT · GUESS WHO',160,112);
+  drawHero(ctx,{cx:540,cy:450,R:250,mode,chains,path,dimensions,sketch:null,guess:true,colors});
+  ctx.textAlign='center';ctx.fillStyle=colors.text;ctx.font='60px "Noto Serif SC",serif';ctx.fillText(copy.title,540,860);
+  ctx.fillStyle=colors.muted;ctx.font='28px "Noto Serif SC",serif';ctx.fillText(copy.subtitle+(hint?(zh?` · 提示：${hint}`:` · Hint: ${hint}`):''),540,918);ctx.textAlign='left';
+  const {top}=drawShareQr(ctx,shareURL,1008,h-56,300);
+  ctx.fillStyle=colors.text;ctx.font='40px "Noto Serif SC",serif';ctx.fillText(copy.challenge,88,top+80);
+  ctx.fillStyle=colors.accent;ctx.font='24px "Noto Sans SC",sans-serif';ctx.fillText('fourier.jupyter.pro',88,top+136);
+  ctx.fillStyle=colors.muted;ctx.font='20px "Noto Serif SC",serif';ctx.fillText(zh?'成绩卡不含答案，放心转发':'No spoilers on this card',88,h-112);
+  return card;
+}
+
+// Formula card: "This is my formula. It can restore how I look."
+// Everything printed here is decoded from the QR's own payload (the self-contained link): the visible formula,
+// the line portrait and the counts are exactly what a scan will reconstruct — no server, no expiry.
+export function formulaCardCopy({formula,name='',energy=1,lang='zh',hasSketch=false}){
+  const zh=lang==='zh',pct=`${(energy*100).toFixed(energy>.999?1:1)}%`;
+  return {
+    title:name?(zh?`${name}的公式。`:`${name}'s formula.`):(zh?'这是我的公式。':'This is my formula.'),
+    subtitle:zh?'它能复原我的样子。':'It can bring back how I look.',
+    summary:zh?`${formula.circles} 个旋转的圆 · ${formula.axes.map(a=>`${a.axis} ${a.terms.length}`).join(' / ')} 项 · 保留 ${pct} 能量`:`${formula.circles} rotating circles · ${formula.axes.map(a=>`${a.axis} ${a.terms.length}`).join(' / ')} terms · ${pct} of the energy`,
+    portrait:zh?'↑ 只用这串公式画出的我':'↑ Drawn from this formula alone',
+    cta:zh?'扫码，用这串公式复原我':'Scan to rebuild me from this formula',
+    promise:zh?['二维码里就是这串公式',hasSketch?'线条永久可复原 · 素描 30 天内可见':'不经服务器 · 永不过期']:['The QR holds this very formula',hasSketch?'Lines restore forever · sketch for 30 days':'No server · never expires']
+  };
+}
+
+function wrapFormula(ctx,{axis,terms,real},x,y,width,lineHeight,maxLines,lang){
+  const parts=expressionParts(terms,{real}),lines=[];let line=`${axis}(t) = `,used=0;
+  for(const part of parts){
+    const next=line+(line.endsWith('= ')?'':' ')+part;
+    if(ctx.measureText(next+' + ⋯').width>width&&!line.endsWith('= ')){if(lines.length===maxLines-1)break;lines.push(line);line='      '+part;}
+    else line=next;
+    used++;
+  }
+  if(used<parts.length)line+=' + ⋯';
+  lines.push(line);
+  lines.forEach((text,i)=>ctx.fillText(text,x,y+i*lineHeight));
+  const note=lang==='zh'?`共 ${terms.length} 项${used<terms.length?`，卡上印出前 ${used} 项`:''}`:`${terms.length} terms${used<terms.length?`, first ${used} printed`:''}`;
+  return {height:lines.length*lineHeight,note};
+}
+
+export function renderFormulaCard({mode,chains,path,dimensions,name='',energy=1,shareURL,lang='zh',hasSketch=false,date=new Date()},format='34'){
+  const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
+  const ctx=card.getContext('2d'),h=card.height,tall=format==='916',colors=getPalette('ink'),zh=lang==='zh';
+  const formula=canonicalFormula(mode,chains),copy=formulaCardCopy({formula,name,energy,lang,hasSketch});
+  ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
+  for(let i=0;i<26000;i++){ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,i*i*137%h,1,1);}
+  ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
+  ctx.fillStyle=colors.accent;ctx.fillRect(88,72,48,64);ctx.fillStyle=colors.background;ctx.textAlign='center';ctx.font='24px "Noto Serif SC",serif';ctx.fillText('圆',112,98);ctx.fillText('周',112,126);ctx.textAlign='left';
+  ctx.fillStyle=colors.muted;ctx.font='22px "Noto Serif SC",serif';ctx.fillText(zh?'圆周之间 · 傅里叶公式':'FOURIER PORTRAIT · FORMULA',160,100);
+  ctx.font='20px "Noto Sans SC",sans-serif';ctx.fillText(`N° ${editionNumber(mode,chains)}  ·  ${date.getFullYear()}.${String(date.getMonth()+1).padStart(2,'0')}.${String(date.getDate()).padStart(2,'0')}`,160,128);
+  // title
+  ctx.fillStyle=colors.text;ctx.font='64px "Noto Serif SC",serif';ctx.fillText(copy.title,88,tall?290:250);
+  ctx.fillStyle=colors.accent;ctx.font='34px "Noto Serif SC",serif';ctx.fillText(copy.subtitle,88,tall?350:304);
+  // the formula itself — the hero
+  let y=tall?450:378;const lineHeight=tall?46:40,maxLines=tall?8:4;
+  ctx.font=`italic ${tall?27:25}px KaTeX_Math,KaTeX_Main,serif`;
+  for(const {axis,terms} of formula.axes){
+    ctx.fillStyle=colors.line;const block=wrapFormula(ctx,{axis,terms,real:mode==='xy'},88,y,904,lineHeight,maxLines,lang);
+    ctx.fillStyle=colors.accent;ctx.font='20px "Noto Serif SC",serif';ctx.textAlign='right';ctx.fillText(block.note,992,y+block.height-lineHeight+30);ctx.textAlign='left';ctx.font=`italic ${tall?27:25}px KaTeX_Math,KaTeX_Main,serif`;
+    y+=block.height+(tall?34:22);
+  }
+  ctx.fillStyle=colors.muted;ctx.font='22px "Noto Sans SC",sans-serif';ctx.fillText(copy.summary,88,y+8);
+  ctx.strokeStyle=colors.accent+'55';ctx.beginPath();ctx.moveTo(88,y+34);ctx.lineTo(992,y+34);ctx.stroke();
+  // bottom: the portrait this formula draws (lines only) and the QR that carries the formula
+  // Left column: the lens with the line portrait, its caption and the promise; right column: the QR.
+  const qr=drawShareQr(ctx,shareURL,1008,h-56,460),column=1008-qr.extent-24-88,top=y+56,bottom=h-64;
+  const R=Math.max(90,Math.min(column/2-34,(bottom-top-150)/2)),cx=88+column/2,cy=top+R+34;
+  drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch:null,guess:false,colors});
+  ctx.textAlign='center';ctx.fillStyle=colors.muted;ctx.font='20px "Noto Serif SC",serif';ctx.fillText(copy.portrait,cx,cy+R+58);
+  ctx.font='18px "Noto Serif SC",serif';copy.promise.forEach((line,i)=>ctx.fillText(line,cx,cy+R+92+i*28));
+  ctx.fillStyle=colors.text;ctx.font='30px "Noto Serif SC",serif';ctx.textAlign='right';ctx.fillText(copy.cta,1008,qr.top-28);ctx.textAlign='left';
+  return {canvas:card,qrVersion:(qr.modules-17)/4};
 }

@@ -12,7 +12,7 @@ import {PALETTES,PALETTE_IDS,normalizePalette} from './palettes.mjs';
 import {backgroundComplexity,portraitCrop,detectFace,shouldEnhancePortrait,featureRegions,touchesFeature} from './portrait-preprocess.mjs';
 import {consolidatePortrait} from './strokes.mjs';
 import {analyzeSketch} from './path.mjs';
-import {numericExcerpt,cardCopy,renderSocialCard,drawCardQr,CARD_GOLD,CARD_NIGHT} from './card.mjs';
+import {numericExcerpt,cardCopy,renderSocialCard,drawCardQr,cardHero,spectrumBars,editionNumber,CARD_GOLD,CARD_NIGHT} from './card.mjs';
 import {chooseLanguage,progressDetails} from './i18n.mjs';
 import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
@@ -133,7 +133,15 @@ test('formula cards use real terms, localized copy and no private portrait',()=>
   assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).nickname,'');
   assert.equal(cardCopy({mode:'xy',chains:{x:[],y:[]}}).equations[0].text,'0');
   assert.throws(()=>cardCopy({mode:'xy',chains:{x:[{k:0,amplitude:NaN,phase:0}],y:[]}}),RangeError);
-  assert.ok(!renderSocialCard.toString().includes('sketch'));
+  assert.equal(cardHero({guess:true,sketch:{}}),'silhouette');assert.equal(cardHero({guess:false,sketch:{}}),'portrait');assert.equal(cardHero({}),'lines');
+  assert.equal(cardCopy({mode:'xy',chains,name:'Ada',guess:true}).headline,'Me = 2 rotating circles');assert.equal(zh.headline,'Ada = 2 个旋转的圆');
+});
+
+test('card fingerprint: spectrum merges conjugates per axis and the edition number is stable',()=>{
+  const chains={x:[{k:2,amplitude:3,phase:0},{k:-2,amplitude:3,phase:0},{k:0,amplitude:9,phase:0}],y:[{k:1,amplitude:1.5,phase:1}]};
+  const [x,y]=spectrumBars('xy',chains,4);assert.deepEqual(x,[0,1,0,0]);assert.ok(y[0]>0&&y[0]<1);assert.deepEqual(y.slice(1),[0,0,0]);
+  assert.equal(editionNumber('xy',chains),editionNumber('xy',structuredClone(chains)));assert.match(editionNumber('xy',chains),/^\d{5}$/);
+  assert.notEqual(editionNumber('xy',chains),editionNumber('xy',{...chains,y:[{k:1,amplitude:1.6,phase:1}]}));
 });
 
 test('polished cards wrap at term boundaries and keep one bilingual scan CTA',()=>{
@@ -284,7 +292,7 @@ test('vendored QR encoder uses separate Byte and Numeric segments within v18',()
 test('card excerpts combine real conjugate terms and handle empty and invalid coefficients',()=>{
   const pair=[{k:1,amplitude:2,phase:.4},{k:-1,amplitude:2,phase:-.4}];
   assert.equal(numericExcerpt(pair),'4 cos(2πt + 0.4)');
-  assert.match(numericExcerpt(pair,false),/e⁽/);
+  assert.equal(numericExcerpt(pair,false),'(1.84 + 0.779i) e^(2πit) + (1.84 − 0.779i) e^(−2πit)');
   assert.equal(numericExcerpt([]),'0');
   assert.throws(()=>numericExcerpt([{k:NaN,amplitude:2,phase:0}]),RangeError);
 });
@@ -370,7 +378,8 @@ test('personal LaTeX includes current terms, valid delimiters and clean signs',(
   for(const mode of ['xy','complex']){
     const body=formulaBody(mode,chains),document=latexDocument(mode,chains);
     assert.ok(!body.includes('+ -'));assert.ok(!document.includes('+ -'));
-    assert.equal((body.match(/\\cos/g)||[]).length,mode==='xy'?4:0);
+    // XY: the k=0 circle is a constant, the k=±1 pair is one cosine term per axis.
+    assert.equal((body.match(/\\cos/g)||[]).length,mode==='xy'?2:0);
     assert.equal((body.match(/e\^/g)||[]).length,mode==='complex'?2:0);
     let depth=0;for(const c of document){if(c==='{')depth++;if(c==='}')depth--;assert.ok(depth>=0);}assert.equal(depth,0);
     assert.ok(document.includes('\\documentclass{article}'));assert.ok(document.includes('\\end{document}'));

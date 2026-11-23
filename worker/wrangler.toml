@@ -1,7 +1,10 @@
 name = "fourier-portrait-share"
 main = "index.mjs"
 compatibility_date = "2026-11-01"
-workers_dev = true
+workers_dev = true  # keeps legacy links (old SKETCH_API_BASE) working
+
+# Same-origin API on the production site. Requires the jupyter.pro zone on this Cloudflare account.
+routes = [{ pattern = "fourier.jupyter.pro/api/*", zone_name = "jupyter.pro" }]
 
 [observability]
 enabled = false

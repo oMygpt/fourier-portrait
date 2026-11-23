@@ -4,14 +4,27 @@ ort.env.wasm.numThreads=1;
 ort.env.logLevel='error';
 let session=null;
 
+let partsManifest=null;
+function modelParts(){
+  partsManifest??=fetch(new URL('models/parts.json',self.location.href).href).then(r=>r.ok?r.json():{}).catch(()=>({}));
+  return partsManifest;
+}
+
 async function modelBytes(file,id){
   const url=new URL(`models/${file}`,self.location.href).href;
   const notify=data=>postMessage({id,file,...data});
   let cache;
   try{cache=await caches.open('fourier-lineart-v1');const saved=await cache.match(url);if(saved){const bytes=await saved.arrayBuffer();notify({progress:100,cached:true,received:bytes.byteLength,total:bytes.byteLength});return bytes;}}catch{}
-  const response=await fetch(url);if(!response.ok)throw Error('Model download failed');
-  const total=Number(response.headers.get('content-length'))||0,reader=response.body.getReader(),chunks=[];let received=0;
-  while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:total?Math.min(99,Math.round(received/total*100)):0,received,total});}
+  // Hosts with a per-file size limit (Cloudflare Pages: 25 MiB) serve big models as parts listed in models/parts.json.
+  const parts=(await modelParts())[file],urls=parts?parts.parts.map(part=>new URL(`models/${part}`,self.location.href).href):[url];
+  const chunks=[];let received=0,total=parts?.size||0;
+  for(const partUrl of urls){
+    const response=await fetch(partUrl);if(!response.ok)throw Error('Model download failed');
+    if(!parts)total=Number(response.headers.get('content-length'))||0;
+    const reader=response.body.getReader();
+    while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.length;notify({progress:total?Math.min(99,Math.round(received/total*100)):0,received,total});}
+  }
+  if(parts&&received!==parts.size)throw Error('Model download incomplete');
   const bytes=new Uint8Array(received);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
   try{await cache?.put(url,new Response(bytes,{headers:{'content-type':'application/octet-stream'}}));}catch{}
   notify({progress:100,received,total:received});return bytes;

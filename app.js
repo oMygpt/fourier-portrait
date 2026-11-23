@@ -2,8 +2,11 @@ import {dft,realDft,evaluate,chainTip,axisEnvelope,xyLayout} from './fourier.mjs
 import {xdog,styleParameters,thresholdSketch} from './lineart.mjs';
 import {modelLineArt,cancelLineArt} from './ml-client.mjs';
 import {formulaBody,latexDocument,limitChains} from './portrait.mjs';
-import {encodePortrait,decodePortrait,cleanName,SHARE_BASE} from './share.mjs';
-import {renderSocialCard} from './card.mjs';
+import {encodePortrait,decodePortrait,cleanName,cleanHint,SHARE_BASE} from './share.mjs';
+import {renderSocialCard,renderScoreCard,renderFormulaCard,drawCardQr} from './card.mjs';
+import {canonicalFormula,formulaSummary} from './formula.mjs';
+import {prepareVideo,recordVideo,preferredVideoType} from './video.mjs';
+import {prepareRiddle,riddleState,recognisedAt,scoreText} from './riddle.mjs';
 import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
@@ -12,7 +15,9 @@ import {featureRegions} from './portrait-preprocess.mjs';
 import {tintSketch,sketchReveal,drawSketch} from './sketch.mjs';
 import {initialLanguage,translatePage,progressDetails} from './i18n.mjs';
 import {createToneMap,renderTonePixels} from './tone.mjs';
-import {publishSketch,fetchSketch} from './encrypted-sketch.mjs';
+import {publishBundle,fetchSketch,fetchEnvelope,revokeShare} from './encrypted-sketch.mjs';
+import {listShares,rememberShare,forgetShare} from './my-shares.mjs';
+import {packPortraitMeta,unpackPortraitMeta,encodePointer,decodePointer} from './bundle.mjs';
 
 const $=id=>document.getElementById(id),canvas=$('canvas'),ctx=canvas.getContext('2d');
 const trail=document.createElement('canvas');trail.width=trail.height=900;
@@ -25,12 +30,13 @@ let picture=null,sketch=null,tinted=null,sketchPending=false,sketchArrived=0,lat
 let toneMap=null,toneSurface=null,sketchHasTone=false;
 let fullShare=null,fullUpload=null,fullUploadController=null,sharedReference=null,sharedFull=null,fullArrived=0,fullState='none';
 let manual=false,time=0,drawn=0,playing=true,last=0,busy=false,source='',sampleId='',strokeCount=0;
-let sharedName='',sharedGuess=false,surfaceRatio=1,sharedWidth=900;
+let riddle=null,riddleStart=0,riddleScore,riddleShown=0,sharedHint='',sharedName='',sharedGuess=false,surfaceRatio=1,sharedWidth=900;
 let processing=false,processingStarted=0,downloadStarted=0,downloadFile='',progressData={},processingPhase='loading',matte=null,matteArrived=0;
-let cardSurface=null,cardPayload=null,cardGeneration=0,status=()=>'',errorText=()=>'',formulaStatus=()=>'',cardStatus=()=>'';
+let cardShareURL='',videoController=null,cardSurface=null,cardPayload=null,cardGeneration=0,status=()=>'',errorText=()=>'',formulaStatus=()=>'',cardStatus=()=>'';
 const samples=[['fourier','傅里叶','Fourier','Fourier2.jpg'],['einstein','爱因斯坦','Einstein','Albert_Einstein_Head.jpg'],['newton','牛顿','Newton','GodfreyKneller-IsaacNewton-1689.jpg'],['curie','居里夫人','Curie','Marie_Curie_c1920.jpg'],['euler','欧拉','Euler','Leonhard_Euler.jpg'],['gauss','高斯','Gauss','Carl_Friedrich_Gauss_1840_by_Jensen.jpg']];
 const t=(zh,en)=>lang==='zh'?zh:en,colors=()=>getPalette(palette),chains=()=>({x:activeX,y:activeY,complex:active});
 function applyPalette(value){palette=normalizePalette(value);document.body.dataset.palette=palette;document.documentElement.style.background=colors().background;document.querySelector('meta[name="theme-color"]').content=colors().background;tinted=null;}
+const cardType=()=>$('card-type').value;
 function count(){return mode==='xy'?activeX.length+activeY.length:active.length;}
 function updateUI(){
   translatePage(lang);
@@ -39,8 +45,13 @@ function updateUI(){
   $('landing-actions').hidden=shared||stage!=='landing'||processing;
   $('working-actions').hidden=stage!=='drawing'||demo;
   $('result-actions').hidden=shared||stage!=='result';
-  $('shared-start').hidden=!shared;
-  $('personal-formula').hidden=!path.length||demo||(!shared&&processing);
+  $('shared-start').hidden=!shared||stage==='riddle';
+  if(shared&&sharedGuess&&stage==='result')$('shared-start').textContent=t('回赠一张 ↗','Send one back ↗');
+  $('riddle').hidden=stage!=='riddle';$('riddle-hint').hidden=!sharedHint;$('riddle-hint').textContent=t('提示：','Hint: ')+sharedHint;
+  $('riddle-result').hidden=!(shared&&sharedGuess&&stage==='result'&&riddle&&riddleScore!==undefined);
+  if(riddle)$('riddle-score').textContent=scoreText(riddleScore,riddle.total,lang);
+  $('card-hint-row').hidden=!cardType()==='guess';
+  $('personal-formula').hidden=!path.length||demo||(!shared&&processing)||stage==='riddle';
   $('shared-controls').hidden=!shared;
   $('play').textContent=playing?t('Ⅱ 暂停绘制','Ⅱ Pause'):t('▷ 继续绘制','▷ Continue');
   $('download').disabled=sketchPending;
@@ -136,7 +147,7 @@ async function prepare(image,id,token){
 }
 async function loadImage(src,name,isDemo=false,id=''){
   const token=++generation;cancelLineArt(true);pathWorker?.terminate();pathWorker=null;lateSketch=null;busy=true;
-  fullUploadController?.abort();fullUploadController=null;fullUpload=null;fullShare=null;$('include-full').checked=false;cardGeneration++;cardPayload=cardSurface=null;
+  fullUploadController?.abort();fullUploadController=null;fullUpload=null;fullShare=null;$('include-full').checked=true;cardGeneration++;cardPayload=cardSurface=null;
   if($('card-dialog').open)$('card-dialog').close();
   toneMap=toneSurface=null;sketchHasTone=false;
   errorText=()=>'';matte=null;matteArrived=0;processingStarted=performance.now();downloadStarted=processingStarted;downloadFile='';progressData={};processingPhase=id?'formula':'loading';
@@ -160,7 +171,7 @@ async function loadImage(src,name,isDemo=false,id=''){
 }
 function layout(){
   const scale=590/Math.max(dimensions.width,dimensions.height);plot={x:450,y:450,scale};
-  if(stage==='result')return;
+  if(stage==='result'||stage==='riddle')return;
   if(mode==='xy'){const xy=xyLayout(dimensions,!manual&&bounds?bounds.x:axisEnvelope(activeX),!manual&&bounds?bounds.y:axisEnvelope(activeY));plot=xy.plot;topChain=xy.top;leftChain=xy.left;}
 }
 function reset(isDemo=false){
@@ -174,7 +185,8 @@ function previewFormula(){
   const limit=narrow.matches?1:2,body=formulaBody(mode,chains(),limit,lang);$('formula-preview').textContent=body;
   if(window.katex)window.katex.render(body,$('formula-preview'),{throwOnError:false,displayMode:true});
   $('terms-value').value=mode==='xy'?`X ${activeX.length} / Y ${activeY.length}`:String(active.length);
-  $('formula-count').textContent=shared?t(`${count()} 个圆 · 由分享的数学系数重建`,`${count()} circles · Reconstructed from shared coefficients`):t(`${manual?'手动 N':'自动 N'} · X ${activeX.length} / Y ${activeY.length} 项 · 预览每轴前 ${limit} 项`,`${manual?'Manual N':'Automatic N'} · X ${activeX.length} / Y ${activeY.length} terms · First ${limit} ${limit===1?'term':'terms'} per axis`);
+  const summary=formulaSummary(canonicalFormula(mode,chains()),lang);
+  $('formula-count').textContent=shared?t(`${summary} · 这张画像完全由这串公式复原`,`${summary} · This portrait is rebuilt from this formula alone`):t(`${manual?'手动 N':'自动 N'} · ${summary} · 预览每轴前 ${limit} 项`,`${manual?'Manual N':'Automatic N'} · ${summary} · first ${limit} ${limit===1?'term':'terms'} per axis`);
   $('restore-auto').hidden=!manual;$('shared-count').textContent=t(`${count()} / ${$('shared-terms').max} 个圆`,`${count()} / ${$('shared-terms').max} circles`);
 }
 function pen(t){const p=mode==='xy'?{x:chainTip(activeX,t).x,y:chainTip(activeY,t,Math.PI/2).y}:evaluate(active,t);return{x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale};}
@@ -202,8 +214,26 @@ function drawChain(values,origin,rotation=0){
   for(const c of values){const a=c.phase+2*Math.PI*c.k*time+rotation,r=c.amplitude*plot.scale,nx=x+r*Math.cos(a),ny=y+r*Math.sin(a);
     if(r>.6){ctx.strokeStyle=r>8?colors().strong:colors().guide;ctx.lineWidth=r>8?weight:weight*.65;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke();ctx.strokeStyle=r>8?colors().accent+'AA':colors().guide;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(nx,ny);ctx.stroke();}x=nx;y=ny;}return{x,y};
 }
+function startRiddle(){
+  riddle=prepareRiddle(mode,chains(),path,2400);riddleStart=performance.now();riddleScore=undefined;riddleShown=0;
+  stage='riddle';document.body.dataset.stage=stage;layout();ink.clearRect(0,0,900,900);updateUI();
+}
+function revealRiddle(n){
+  if(stage!=='riddle')return;riddleScore=n;fullArrived=performance.now();finish();
+}
+function riddleNow(){return riddleState((performance.now()-riddleStart)/1000,riddle.rungs.length);}
+function renderRiddle(){
+  const state=riddleNow();if(state.done){revealRiddle(null);return;}
+  const a=riddle.rungs[state.index],b=riddle.rungs[Math.min(riddle.rungs.length-1,state.index+1)],f=state.morph,shown=recognisedAt(riddle.rungs,state);
+  const map=p=>({x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}),points=a.points.map((p,i)=>({x:p.x+(b.points[i].x-p.x)*f,y:p.y+(b.points[i].y-p.y)*f,draw:f<.5?p.draw:b.points[i].draw}));
+  ctx.lineCap=ctx.lineJoin='round';
+  for(const [color,width,lifts] of [[colors().guide,1,false],[colors().line,2.4,true]]){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();points.forEach((p,i)=>{const q=map(p);if(!i||(lifts&&!p.draw))ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();}
+  if(shown!==riddleShown){riddleShown=shown;$('progress').textContent=`N = ${shown}`;$('riddle-count').textContent=t(`现在：${shown} 个圆 / 共 ${riddle.total} 个`,`Now: ${shown} of ${riddle.total} circles`);}
+  $('drawing-progress').value=(state.index+f)/Math.max(1,riddle.rungs.length-1);
+}
 function render(){
   ctx.clearRect(0,0,900,900);if(!path.length)return;
+  if(stage==='riddle'){renderRiddle();return;}
   composition(ctx,stage==='result'?1:time);if(stage==='result')return;
   let tip;if(mode==='xy'){const X=drawChain(activeX,topChain),Y=drawChain(activeY,leftChain,Math.PI/2);tip={x:X.x,y:Y.y};ctx.strokeStyle=colors().accent+'70';ctx.lineWidth=1;ctx.setLineDash([5,7]);ctx.beginPath();ctx.moveTo(X.x,X.y);ctx.lineTo(tip.x,tip.y);ctx.lineTo(Y.x,Y.y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=colors().text;ctx.font=`${Math.max(26,12*900/canvas.getBoundingClientRect().width)}px "Noto Serif SC",serif`;ctx.textAlign='right';ctx.fillText('X · x(t)',210,180);ctx.textAlign='center';ctx.save();ctx.translate(34,530);ctx.rotate(-Math.PI/2);ctx.fillText('Y · y(t)',0,0);ctx.restore();ctx.textAlign='left';}else tip=drawChain(active,{x:plot.x,y:plot.y});
   ctx.fillStyle=colors().accent;ctx.beginPath();ctx.arc(tip.x,tip.y,2.6,0,Math.PI*2);ctx.fill();
@@ -225,7 +255,7 @@ narrow.addEventListener('change',()=>{if(path.length&&!demo)previewFormula();});
 function frame(now){
   const dt=last?Math.min((now-last)/1000,.08):0;last=now;if(shared)resizeShared();
   if(!busy&&active.length&&playing&&(stage==='drawing'||stage==='landing')){time=Math.min(1,time+(reduced.matches?1:dt/22));drawTrail(Math.floor(time*7200));if(time===1){if(demo){if(!reduced.matches)reset(true);}else finish();}}
-  $('progress').textContent=`${String(Math.round(time*100)).padStart(2,'0')}%`;$('drawing-progress').value=time;if(!busy)render();renderMatte(now);requestAnimationFrame(frame);
+  if(stage!=='riddle'){$('progress').textContent=`${String(Math.round(time*100)).padStart(2,'0')}%`;$('drawing-progress').value=time;}if(!busy)render();renderMatte(now);requestAnimationFrame(frame);
 }
 function download(surface,name){const a=document.createElement('a');a.download=name;a.href=surface.toDataURL('image/png');a.click();}
 async function encryptedReference(){
@@ -233,30 +263,41 @@ async function encryptedReference(){
   if(!sketchHasTone||!sketch||sketchPending)throw new Error('Sketch unavailable');
   if(!fullUpload){
     const imageGeneration=generation,controller=new AbortController();
-    const pending=publishSketch(sketch,{signal:controller.signal}).then(reference=>{
+    const meta=packPortraitMeta({mode,chains:{x:xCoefficients,y:yCoefficients,complex:coefficients},path,dimensions});
+    const pending=publishBundle(sketch,meta,{signal:controller.signal}).then(reference=>{
       if(imageGeneration!==generation||controller.signal.aborted)throw new DOMException('Cancelled','AbortError');
-      fullShare=reference;status=()=>t('加密素描已保存 30 天 · 原始照片仍在本地','Encrypted sketch stored for 30 days · Original photo stays local');updateUI();return reference;
+      fullShare=reference;try{rememberShare({id:reference.id,deleteToken:reference.deleteToken,label:cleanName($('card-name').value)||source||''});}catch{}renderShares();status=()=>t('素描与完整公式已加密保存 30 天 · 原始照片仍在本地','Sketch and full formula encrypted for 30 days · Original photo stays local');updateUI();return reference;
     }).catch(error=>{if(fullUpload===pending)fullUpload=null;throw error;});
     fullUploadController=controller;fullUpload=pending;
   }
   return fullUpload;
 }
 async function createCard(){
-  const token=++cardGeneration,imageGeneration=generation,includeFull=$('include-full').checked;cardStatus=()=>t('正在排版你的公式卡…','Typesetting your formula card…');$('card-status').textContent=cardStatus();for(const id of ['save-card','system-share','copy-link'])$(id).disabled=true;cardPayload=cardSurface=null;$('share-url').value='';
+  const token=++cardGeneration,imageGeneration=generation,includeFull=$('include-full').checked;cardStatus=()=>t('正在排版你的公式卡…','Typesetting your formula card…');$('card-status').textContent=cardStatus();for(const id of ['save-card','system-share','copy-link','save-video'])$(id).disabled=true;cardPayload=cardSurface=null;$('share-url').value='';
   try{
     await document.fonts.ready;await Promise.all(['36px KaTeX_Main','italic 36px KaTeX_Math'].map(font=>document.fonts.load(font)));
-    const teaser=new Image();teaser.src='samples/fourier-u2.png';await teaser.decode();if(token!==cardGeneration)return;
     if(sketchHasTone&&!toneMap)toneMap=sketchTone();
-    let encryptedSketch=null;
-    if(includeFull){cardStatus=()=>t('正在本地加密并上传素描…','Encrypting locally and uploading the sketch…');$('card-status').textContent=cardStatus();encryptedSketch=await encryptedReference();}
+    let encryptedSketch=null,uploadFailed=false;
+    if(includeFull&&sketchHasTone&&!sketchPending){
+      cardStatus=()=>t('正在本地加密并上传素描与公式…','Encrypting locally and uploading the sketch and formula…');$('card-status').textContent=cardStatus();
+      try{encryptedSketch=await encryptedReference();}catch{if(token!==cardGeneration)return;uploadFailed=true;}
+    }
     if(token!==cardGeneration||imageGeneration!==generation)return;
-    const snapshot={mode,chains:chains(),path,dimensions,toneMap,encryptedSketch,name:cleanName($('card-name').value),guess:$('card-guess').checked,palette:'ink'},payload=encodePortrait(snapshot,SHARE_BASE);
-    const card=renderSocialCard({...snapshot,teaser,lang,energy:payload.energy,shareURL:payload.url},$('card-format').value);
-    cardSurface=card.canvas;cardPayload=payload;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
-    cardStatus=()=>t(`${payload.bytes} 字节 · QR v${card.qrVersion} · ${encryptedSketch?'完整素描已加密 · 保存 30 天':toneMap?'含素描明暗':'仅轮廓'} · 分享 ${payload.terms.filter(Boolean).join(' / ')} 项`,`${payload.bytes} bytes · QR v${card.qrVersion} · ${encryptedSketch?'Full sketch encrypted · Stored 30 days':toneMap?'Includes sketch tones':'Contours only'} · ${payload.terms.filter(Boolean).join(' / ')} shared terms`);$('card-status').textContent=cardStatus();for(const id of ['save-card','system-share','copy-link'])$(id).disabled=false;
+    const snapshot={mode,chains:chains(),path,dimensions,toneMap,encryptedSketch,name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),palette:'ink'},payload=encodePortrait(snapshot,SHARE_BASE);
+    // QR: short pointer to the encrypted bundle when uploaded; copied text link: self-contained formula + tones + E1.
+    const pointer=encryptedSketch?encodePointer({reference:encryptedSketch,counts:mode==='xy'?[activeX.length,activeY.length]:[active.length,0],name:snapshot.name,guess:snapshot.guess,hint:snapshot.hint,palette:snapshot.palette}):null;
+    // Formula card: its QR *is* the formula (self-contained link). What it prints is decoded from that same payload.
+    const formulaCard=cardType()==='formula',decoded=formulaCard?decodePortrait(payload.url):null;
+    const card=formulaCard?renderFormulaCard({mode:decoded.mode,chains:decoded.chains,path:decoded.path,dimensions:decoded.dimensions,name:snapshot.name,energy:payload.energy,shareURL:payload.url,lang,hasSketch:Boolean(encryptedSketch)},$('card-format').value)
+      :renderSocialCard({...snapshot,sketch:sketchHasTone&&sketch&&!sketchPending?(tinted||=tintSketch(sketch,palette)):null,lang,shareURL:pointer?.url??payload.url},$('card-format').value);
+    cardSurface=card.canvas;cardPayload=payload;cardShareURL=formulaCard?payload.url:pointer?.url??payload.url;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
+    cardStatus=()=>formulaCard?t(`公式卡 · 二维码里就是这串公式（QR v${card.qrVersion}）· ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'zh')} · 保留 ${(payload.energy*100).toFixed(1)}% 能量`,`Formula card · the QR is this formula (QR v${card.qrVersion}) · ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'en')} · ${(payload.energy*100).toFixed(1)}% of the energy`)
+      :pointer?t(`高清二维码 v${card.qrVersion} · 素描与 ${count()} 项公式已加密保存 30 天 · 文字链接离线也能画出线条`,`HD QR v${card.qrVersion} · Sketch and ${count()}-term formula encrypted for 30 days · The text link draws lines even offline`)
+      :t(`${uploadFailed?'上传失败，已改用离线二维码 · ':''}${payload.bytes} 字节 · QR v${card.qrVersion} · ${toneMap?'含素描明暗':'仅轮廓'} · 分享 ${payload.terms.filter(Boolean).join(' / ')} 项`,`${uploadFailed?'Upload failed, using an offline QR · ':''}${payload.bytes} bytes · QR v${card.qrVersion} · ${toneMap?'Includes sketch tones':'Contours only'} · ${payload.terms.filter(Boolean).join(' / ')} shared terms`);
+    $('revoke-share').hidden=!pointer;$('card-status').textContent=cardStatus();for(const id of ['save-card','system-share','copy-link'])$(id).disabled=false;$('save-video').disabled=!preferredVideoType();
   }catch{if(token===cardGeneration){cardStatus=()=>includeFull?t('加密卡片暂不可用。请重试，或取消附带完整素描。','Encrypted card unavailable. Retry, or uncheck full sketch.'):t('卡片暂时无法生成，请重试或缩短署名。','Could not create the card. Retry or use a shorter nickname.');$('card-status').textContent=cardStatus();}}
 }
-for(const button of document.querySelectorAll('[data-lang]'))button.addEventListener('click',()=>{lang=button.dataset.lang;try{localStorage.setItem('fourier-language',lang);}catch{}updateUI();if($('card-dialog').open)createCard();});
+for(const button of document.querySelectorAll('[data-lang]'))button.addEventListener('click',()=>{lang=button.dataset.lang;try{localStorage.setItem('fourier-language',lang);}catch{}updateUI();renderShares();if($('card-dialog').open)createCard();});
 for(const[id,zh,en,file]of samples){const button=document.createElement('button');button.className='sample';button.dataset.sample=id;const image=new Image(52,52);image.src=`samples/${id}-thumb.jpg`;image.alt='';const label=document.createElement('span');label.textContent=t(zh,en);button.append(image,label);button.addEventListener('click',()=>loadImage(`samples/${id}.jpg`,en,false,id));$('samples').append(button);
   const link=document.createElement('a');link.href=`https://commons.wikimedia.org/wiki/File:${file}`;link.textContent=en+' ↗';link.target='_blank';link.rel='noreferrer';$('credits').append(link);}
 async function upload(file){if(!file)return;if(!['image/jpeg','image/png'].includes(file.type)){errorText=()=>t('请选择 JPG 或 PNG 格式的图片。','Please choose a JPG or PNG image.');updateUI();return;}const url=URL.createObjectURL(file);try{await loadImage(url,file.name);}finally{URL.revokeObjectURL(url);}}
@@ -267,12 +308,46 @@ $('play').addEventListener('click',()=>{playing=!playing;updateUI();});$('skip')
 $('terms').addEventListener('input',()=>{manual=true;reset();});$('restore-auto').addEventListener('click',()=>{manual=false;reset();});
 $('shared-terms').addEventListener('input',()=>{if(!shared)return;const selected=limitChains(mode,{x:xCoefficients,y:yCoefficients,complex:coefficients},Number($('shared-terms').value));activeX=selected.x;activeY=selected.y;active=selected.complex;previewFormula();if(stage==='result')drawSharedPortrait();else{layout();ink.clearRect(0,0,900,900);drawn=0;drawTrail(Math.floor(time*7200));}});
 $('download').addEventListener('click',()=>{if(sketchPending)return;const output=document.createElement('canvas');output.width=output.height=900;const out=output.getContext('2d');out.fillStyle=colors().background;out.fillRect(0,0,900,900);composition(out,1,true);download(output,t('我的傅里叶画像.png','my-fourier-portrait.png'));});
-$('open-card').addEventListener('click',()=>{$('card-dialog').showModal();createCard();});$('close-card').addEventListener('click',()=>$('card-dialog').close());
-for(const id of ['card-name','card-format','card-guess'])$(id).addEventListener('change',createCard);
+$('open-card').addEventListener('click',()=>{$('card-dialog').showModal();createCard();});
+$('make-formula-card').addEventListener('click',()=>{$('card-type').value='formula';updateUI();$('card-dialog').showModal();createCard();});$('close-card').addEventListener('click',()=>$('card-dialog').close());
+for(const id of ['card-name','card-format','card-type','card-hint'])$(id).addEventListener('change',()=>{$('card-hint-row').hidden=!cardType()==='guess';createCard();});
 $('include-full').addEventListener('change',()=>{if(!$('include-full').checked&&!fullShare){fullUploadController?.abort();fullUpload=null;}createCard();});
 $('save-card').addEventListener('click',()=>{if(cardSurface)download(cardSurface,t(`我的傅里叶公式-${$('card-format').value}.png`,`my-fourier-formula-${$('card-format').value}.png`));});
 async function copyLink(){if(!cardPayload)return;try{await navigator.clipboard.writeText(cardPayload.url);cardStatus=()=>t('分享链接已复制。','Share link copied.');}catch{$('share-url').focus();$('share-url').select();cardStatus=()=>t('请手动复制选中的链接。','Please copy the selected link.');}$('card-status').textContent=cardStatus();}
 $('copy-link').addEventListener('click',copyLink);
+function qrSurface(url){
+  const qr=window.qrcode(0,url.includes('#s')?'Q':'L');qr.addData(url.slice(0,url.indexOf('#')+2),'Byte');qr.addData(url.slice(url.indexOf('#')+2),/^\d+$/.test(url.slice(url.indexOf('#')+2))?'Numeric':'Byte');qr.make();
+  const unit=Math.max(4,Math.ceil(220/(qr.getModuleCount()+8))),surface=document.createElement('canvas');surface.width=surface.height=(qr.getModuleCount()+8)*unit;
+  drawCardQr(surface.getContext('2d'),qr,0,0,unit,'ink');return surface;
+}
+async function saveVideo(){
+  if(!cardShareURL||videoController)return;
+  const controller=new AbortController(),button=$('save-video');videoController=controller;button.disabled=true;
+  const progress=value=>{cardStatus=()=>t(`正在录制绘制视频 ${Math.round(value*100)}% · 请保持页面在前台`,`Recording the drawing video ${Math.round(value*100)}% · Keep this page visible`);$('card-status').textContent=cardStatus();};
+  try{
+    progress(0);
+    const prep=prepareVideo({mode,chains:chains(),path,dimensions,sketch:sketchHasTone&&sketch&&!sketchPending?tintSketch(sketch,'ink'):null,qr:qrSurface(cardShareURL),name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),lang,palette:'ink'});
+    const blob=await recordVideo(prep,{onProgress:progress,signal:controller.signal}),mp4=blob.type==='video/mp4',file=new File([blob],t('我的傅里叶画像','my-fourier-portrait')+(mp4?'.mp4':'.webm'),{type:blob.type});
+    if(narrow.matches&&navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file]});}catch(error){if(error.name!=='AbortError')throw error;}}
+    else{const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+    cardStatus=()=>mp4?t('绘制视频已保存（MP4）。','Drawing video saved (MP4).'):t('已保存为 WebM。此浏览器无法录制 MP4；发微信或抖音请改用 Safari 或新版 Chrome。','Saved as WebM. This browser cannot record MP4; use Safari or a recent Chrome for WeChat or TikTok.');
+  }catch(error){cardStatus=error.name==='AbortError'?()=>t('视频录制已取消。','Video recording cancelled.'):()=>t('视频录制失败，请重试。','Video recording failed. Please retry.');}
+  finally{videoController=null;button.disabled=!cardPayload;$('card-status').textContent=cardStatus();}
+}
+$('save-video').addEventListener('click',saveVideo);
+$('riddle-got').addEventListener('click',()=>{if(stage==='riddle')revealRiddle(recognisedAt(riddle.rungs,riddleNow()));});
+$('riddle-give-up').addEventListener('click',()=>revealRiddle(null));
+$('riddle-save').addEventListener('click',async()=>{
+  if(!riddle||riddleScore===undefined)return;
+  try{
+    await document.fonts.ready;const surface=renderScoreCard({mode,chains:chains(),path,dimensions,n:riddleScore,total:riddle.total,hint:sharedHint,shareURL:location.href,lang});
+    const blob=await new Promise(resolve=>surface.toBlob(resolve,'image/png')),file=new File([blob],t('我的猜谜成绩.png','my-guess-score.png'),{type:'image/png'});
+    if(narrow.matches&&navigator.canShare?.({files:[file]}))await navigator.share({files:[file]});else download(surface,file.name);
+  }catch(error){if(error.name!=='AbortError'){status=()=>t('成绩卡暂时无法生成。','Could not create the score card.');updateUI();}}
+});
+$('card-dialog').addEventListener('close',()=>videoController?.abort());
+$('revoke-share').addEventListener('click',()=>{const row=fullShare&&listShares().find(r=>r.id===fullShare.id);if(row)withdraw(row);});
+$('my-shares').addEventListener('click',()=>{renderShares();$('shares-status').textContent='';$('shares-dialog').showModal();});$('close-shares').addEventListener('click',()=>$('shares-dialog').close());
 $('system-share').addEventListener('click',async()=>{if(!cardSurface)return;const blob=await new Promise(resolve=>cardSurface.toBlob(resolve,'image/png')),file=new File([blob],'fourier-formula.png',{type:'image/png'});if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:t('我的傅里叶公式','My Fourier Formula')});}catch(error){if(error.name!=='AbortError')await copyLink();}}else await copyLink();});
 $('download-formula').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([latexDocument(mode,chains(),lang)],{type:'application/x-tex;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=t('我的傅里叶公式.tex','my-fourier-formula.tex');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 $('copy-formula').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(formulaBody(mode,chains(),Infinity,lang));formulaStatus=()=>t('公式已复制。','Formula copied.');}catch{formulaStatus=()=>t('无法访问剪贴板，请保存 LaTeX 文件。','Clipboard unavailable. Please save the LaTeX file.');}$('formula-status').textContent=formulaStatus();});
@@ -286,12 +361,53 @@ async function loadFullSketch(reference){
   updateUI();
 }
 function loadShared(){
-  try{const data=decodePortrait(location.hash);shared=true;demo=false;sharedName=data.name;sharedGuess=data.guess;applyPalette(data.palette);document.body.classList.add('shared');({path,dimensions,mode,toneMap}=data);sharedReference=data.encryptedSketch;toneSurface=toneLayer();
+  try{const data=decodePortrait(location.hash);shared=true;demo=false;sharedName=data.name;sharedGuess=data.guess;sharedHint=data.hint||'';applyPalette(data.palette);document.body.classList.add('shared');({path,dimensions,mode,toneMap}=data);sharedReference=data.encryptedSketch;toneSurface=toneLayer();
     coefficients=mode==='complex'?data.chains.complex:dft(path);xCoefficients=mode==='xy'?data.chains.x:realDft(path.map(p=>p.x));yCoefficients=mode==='xy'?data.chains.y:realDft(path.map(p=>p.y));automatic={complex:{count:coefficients.length},x:{count:xCoefficients.length},y:{count:yCoefficients.length}};bounds=null;
     const total=mode==='xy'?xCoefficients.length+yCoefficients.length:coefficients.length;$('shared-terms').max=String(Math.max(1,total));$('shared-terms').disabled=total<2;status=()=>sharedFull?t('公式 + 本地解密的完整素描 · 无原始照片','Formula + locally decrypted full sketch · No original photo'):toneMap?t('公式 + 低分辨率素描明暗 · 无原始照片','Formula + coarse sketch tones · No original photo'):t('仅由数学系数重建 · 没有原始照片','Reconstructed only from coefficients · No original photo');reset();resizeShared();
+    if(sharedGuess)startRiddle();
     if(sharedReference)loadFullSketch(sharedReference);
   }catch{errorText=()=>t('分享链接无效或不完整，请重新复制。','This share link is invalid or incomplete. Please copy it again.');updateUI();}
 }
+function renderShares(){
+  const rows=listShares(),list=$('shares-list');$('my-shares').hidden=!rows.length;list.replaceChildren();
+  for(const row of rows){
+    const item=document.createElement('li'),text=document.createElement('span'),meta=document.createElement('small'),button=document.createElement('button'),days=Math.max(0,30-Math.floor((Date.now()-row.created)/864e5));
+    text.textContent=row.label||t('未署名的画像','Untitled portrait');meta.textContent=t(`${new Date(row.created).toLocaleDateString('zh-CN')} · 还剩 ${days} 天`,`${new Date(row.created).toLocaleDateString('en')} · ${days} days left`);text.append(meta);
+    button.className='quiet revoke';button.textContent=t('撤回','Withdraw');button.addEventListener('click',()=>withdraw(row));item.append(text,button);list.append(item);
+  }
+  if(!rows.length){const empty=document.createElement('li');empty.textContent=t('这台设备上没有未过期的高清分享。','No active HD shares on this device.');list.append(empty);}
+}
+async function withdraw(row){
+  if(!confirm(t('撤回后，这张画像的二维码将无法再打开素描与完整公式。确定撤回？','After withdrawal this portrait\'s QR can no longer open the sketch or full formula. Withdraw?')))return;
+  const note=text=>{$('shares-status').textContent=text;cardStatus=()=>text;$('card-status').textContent=text;};
+  try{
+    await revokeShare(row);forgetShare(row.id);
+    if(fullShare?.id===row.id){fullShare=null;fullUpload=null;$('include-full').checked=false;$('revoke-share').hidden=true;if($('card-dialog').open)createCard();}
+    note(t('已撤回。服务器上的加密副本已删除；文字链接仍能画出线条。','Withdrawn. The encrypted copy is deleted; text links still draw the lines.'));
+  }catch(error){note(error.message==='Not the owner'?t('这台设备没有撤回权限。','This device cannot withdraw that share.'):t('暂时无法撤回，请稍后重试。','Could not withdraw right now. Please retry.'));}
+  renderShares();
+}
+async function loadBundleShared(){
+  let pointer;
+  try{pointer=decodePointer(location.hash);}catch{errorText=()=>t('分享链接无效或不完整，请重新扫码或复制。','This share link is invalid or incomplete. Please scan or copy it again.');updateUI();return;}
+  shared=true;demo=false;busy=true;sharedName=pointer.name;sharedGuess=pointer.guess;sharedHint=pointer.hint||'';applyPalette(pointer.palette);document.body.classList.add('shared');sharedReference=pointer.reference;fullState='loading';
+  status=()=>t('正在获取并在本地解密画像…','Fetching and locally decrypting the portrait…');updateUI();
+  try{
+    const envelope=await fetchEnvelope(pointer.reference);if(!envelope.meta)throw new Error('Not a portrait bundle');
+    const data=unpackPortraitMeta(envelope.meta),image=await createImageBitmap(envelope.image);
+    if(image.width>1024||image.height>1024){image.close();throw new Error('Sketch too large');}
+    sharedFull=tintSketch(image,palette);image.close();
+    ({path,dimensions,mode}=data);toneMap=toneSurface=null;coefficients=data.chains.complex;xCoefficients=data.chains.x;yCoefficients=data.chains.y;
+    const pick=(n,list)=>n>0?Math.min(n,list.length):list.length,[a,b]=pointer.counts;
+    automatic={complex:{count:pick(a,coefficients)},x:{count:pick(a,xCoefficients)},y:{count:pick(b,yCoefficients)}};bounds=null;
+    const total=mode==='xy'?xCoefficients.length+yCoefficients.length:coefficients.length;$('shared-terms').max=String(Math.max(1,total));$('shared-terms').disabled=total<2;
+    status=()=>t('完整精度公式 + 本地解密的素描 · 无原始照片','Full-precision formula + locally decrypted sketch · No original photo');
+    fullArrived=performance.now();fullState='ready';busy=false;reset();resizeShared();if(sharedGuess)startRiddle();
+  }catch{
+    busy=false;fullState='fallback';sharedReference=null;status=()=>'';
+    errorText=()=>t('这张二维码指向的画像已过期或暂时无法获取。可以向分享者要文字链接，过期后它仍能画出线条。','This QR points to a portrait that has expired or is unavailable. Ask the sender for the text link; it still draws the lines after expiry.');updateUI();
+  }
+}
 window.addEventListener('hashchange',()=>{try{if(shouldReloadForHash(location.hash)){history.scrollRestoration='manual';scrollTo({top:0,left:0,behavior:'instant'});location.reload();}}catch{errorText=()=>t('分享链接无效，当前作品已保留。','Invalid share link. Your current portrait is preserved.');updateUI();}});
 window.addEventListener('load',()=>{if(path.length&&!demo)previewFormula();});
-updateUI();if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','Fourier',true,'fourier');requestAnimationFrame(frame);
+updateUI();renderShares();if(location.hash.startsWith('#s'))loadBundleShared();else if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','Fourier',true,'fourier');requestAnimationFrame(frame);

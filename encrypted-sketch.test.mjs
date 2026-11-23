@@ -51,7 +51,7 @@ test('encrypted cards disclose sketch storage and never print the decryption key
   const c=cardCopy({...portrait(),encryptedSketch:reference});assert.match(c.privacy.join(' '),/Sketch encrypted.*30 days/);assert.ok(!JSON.stringify(c).includes(reference.key));
   assert.match(cardCopy({...portrait(),lang:'zh',encryptedSketch:reference}).privacy.join(' '),/端到端加密/);
 });
-test('full-sketch sharing is an unchecked, explicitly described opt-in',async()=>{
+test('HD sharing is on by default, explicitly described and never uploads the photo',async()=>{
   const html=await readFile(new URL('./index.html',import.meta.url),'utf8'),input=html.match(/<input id="include-full"[^>]*>/)?.[0];
-  assert.ok(input);assert.ok(!/checked/.test(input));assert.match(html,/Only ciphertext is uploaded/);assert.match(html,/Saved copies cannot be recalled/);
+  assert.ok(input);assert.match(input,/\bchecked\b/);assert.match(html,/Only ciphertext of the processed result is uploaded; the original photo is not/);assert.match(html,/copies others saved cannot be recalled/);assert.match(html,/withdraw the stored copy at any time/);assert.match(html,/Uncheck to keep only the formula/);
 });
