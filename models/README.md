@@ -12,7 +12,7 @@ The worker delivers contours first, then computes the sketch with ORT WASM. It i
 
 ## Contour / 轮廓
 
-`contour512.onnx`, about 17MB fp32: informative-drawings (Chan et al., CVPR 2021), MIT. Original: https://github.com/carolineec/informative-drawings ; ONNX export: https://huggingface.co/x-Liola-x/informative-drawings-onnx (MIT).
+`contour512-q8.onnx`, 4.4MB: weight-only per-channel int8 (DequantizeLinear → float Conv) of the 17MB fp32 export, made with `tools/quantize-weights.py`. On six portraits its line map matches fp32 with IoU 0.985–0.993 (mean |Δ| ≈ 0.001). Source model: informative-drawings (Chan et al., CVPR 2021), MIT. Original: https://github.com/carolineec/informative-drawings ; ONNX export: https://huggingface.co/x-Liola-x/informative-drawings-onnx (MIT).
 
 Float32 RGB [1,3,512,512], 0–1 → float32 gray [1,1,512,512], white = 1. Aspect-preserving white padding and crop-back. Six precomputed contour samples. Anime model and its unused sample assets have been removed.
 

@@ -50,7 +50,7 @@ async function run({data:{id,bitmap}}){
     catch(error){postMessage({id,message:'人像预处理暂不可用，使用原始描线',preprocessFallback:true,reason:error.message});}
     const source=portrait.image;
     if(!session){
-      const bytes=await modelBytes('contour512.onnx',id);
+      const bytes=await modelBytes('contour512-q8.onnx',id);
       let gpu=false;try{gpu=Boolean(navigator.gpu&&await navigator.gpu.requestAdapter());}catch{}
       if(gpu){try{session=await ort.InferenceSession.create(bytes,{executionProviders:['webgpu','wasm']});}catch{}}
       if(!session)session=await ort.InferenceSession.create(bytes,{executionProviders:['wasm']});
@@ -78,7 +78,7 @@ async function run({data:{id,bitmap}}){
   }catch(error){bitmap?.close();postMessage({id,error:error.message||'Model inference failed'});}
 }
 // Warm-up: fetch the runtime and models in the order a job needs them, without joining the job queue.
-const WARM_ORDER=['yunet.onnx','modnet-q8.onnx','contour512.onnx','u2net-portrait-q8.onnx'];
+const WARM_ORDER=['yunet.onnx','modnet-q8.onnx','contour512-q8.onnx','u2net-portrait-q8.onnx'];
 let warming=null;
 function warm(){
   warming??=(async()=>{
