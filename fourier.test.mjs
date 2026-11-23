@@ -18,7 +18,7 @@ import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {u2Input,u2Gray,sketchReveal,paperSketch,sketchBlend,subjectMatte} from './sketch.mjs';
-import {modelLineArt,cancelLineArt} from './ml-client.mjs';
+import {modelLineArt,cancelLineArt,STALL_MS} from './ml-client.mjs';
 
 test('sketch matte keeps the connected portrait and its soft hair margin, not detached background blobs',()=>{
   const w=21,h=21,matte=new Uint8Array(w*h);for(let y=5;y<17;y++)for(let x=5;x<17;x++)matte[y*w+x]=255;
@@ -37,6 +37,22 @@ test('paper masking removes background and frame edges without pruning interior 
   assert.ok(paperSketch(gray,w,h,new Uint8Array(w*h).fill(128))[50*w+50]>0);
   assert.throws(()=>paperSketch([],0,0),RangeError);assert.throws(()=>paperSketch(gray,w,h,new Uint8Array(2)),RangeError);
   assert.equal(sketchBlend('ink'),'multiply');assert.equal(sketchBlend('navy'),'screen');assert.equal(sketchBlend('silver'),'screen');
+});
+
+test('ML client times out only after a stall, not while large models keep downloading',async t=>{
+  const originalWorker=globalThis.Worker,originalBitmap=globalThis.createImageBitmap,instances=[],updates=[];
+  t.mock.timers.enable({apis:['setTimeout']});
+  globalThis.createImageBitmap=async()=>({});
+  globalThis.Worker=class{constructor(){instances.push(this);}postMessage(data){this.id=data.id;}terminate(){this.terminated=true;}emit(data){this.onmessage({data:{id:this.id,...data}});}};
+  try{
+    const job=modelLineArt({},'contour',()=>{},d=>updates.push(d));await Promise.resolve();const worker=instances[0];
+    for(let i=0;i<5;i++){t.mock.timers.tick(STALL_MS-1000);worker.emit({received:i*1e7,total:7e7,progress:i*14});}
+    assert.ok(!worker.terminated,'a 5 × 89 s download must not time out');
+    worker.emit({gray:Uint8Array.of(1),sketchPending:true});await job;
+    t.mock.timers.tick(STALL_MS-1000);worker.emit({message:'sketching',phase:'sketching'});t.mock.timers.tick(STALL_MS-1000);
+    assert.ok(!worker.terminated);assert.equal(updates.length,0);
+    t.mock.timers.tick(1001);assert.ok(worker.terminated,'90 s with no progress falls back');assert.equal(updates[0].sketchFallback,true);
+  }finally{t.mock.timers.reset();cancelLineArt();globalThis.Worker=originalWorker;globalThis.createImageBitmap=originalBitmap;}
 });
 
 test('ML client resolves contour before a late sketch and ignores stale or failed sketch jobs',async()=>{
