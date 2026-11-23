@@ -295,12 +295,14 @@ async function createCard(){
     const snapshot={mode,chains:chains(),path,dimensions,toneMap,encryptedSketch,name:cleanName($('card-name').value),guess:cardType()==='guess',hint:cleanHint($('card-hint').value),palette:'ink'},payload=encodePortrait(snapshot,SHARE_BASE);
     // QR: short pointer to the encrypted bundle when uploaded; copied text link: self-contained formula + tones + E1.
     const pointer=encryptedSketch?encodePointer({reference:encryptedSketch,counts:mode==='xy'?[activeX.length,activeY.length]:[active.length,0],name:snapshot.name,guess:snapshot.guess,hint:snapshot.hint,palette:snapshot.palette}):null;
-    // Formula card: its QR *is* the formula (self-contained link). What it prints is decoded from that same payload.
-    const formulaCard=cardType()==='formula',decoded=formulaCard?decodePortrait(payload.url):null;
-    const card=formulaCard?renderFormulaCard({mode:decoded.mode,chains:decoded.chains,path:decoded.path,dimensions:decoded.dimensions,toneMap:decoded.toneMap,name:snapshot.name,energy:payload.energy,shareURL:payload.url,lang,hasSketch:Boolean(encryptedSketch)},$('card-format').value)
+    // Formula card: prints the formula its QR opens — the full-precision HD bundle (short QR) when uploaded,
+    // otherwise the self-contained payload decoded from the long QR itself.
+    const formulaCard=cardType()==='formula',decoded=formulaCard&&!pointer?decodePortrait(payload.url):null;
+    const source=decoded||{mode,chains:chains(),path,dimensions,toneMap};
+    const card=formulaCard?renderFormulaCard({mode:source.mode,chains:source.chains,path:source.path,dimensions:source.dimensions,toneMap:source.toneMap,sketch:pointer&&sketchHasTone&&sketch&&!sketchPending?(tinted||=tintSketch(sketch,palette)):null,name:snapshot.name,shareURL:pointer?.url??payload.url,lang},$('card-format').value)
       :renderSocialCard({...snapshot,sketch:sketchHasTone&&sketch&&!sketchPending?(tinted||=tintSketch(sketch,palette)):null,lang,shareURL:pointer?.url??payload.url},$('card-format').value);
-    cardSurface=card.canvas;cardPayload=payload;cardShareURL=formulaCard?payload.url:pointer?.url??payload.url;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
-    cardStatus=()=>formulaCard?t(`公式卡 · 二维码里就是这串公式（QR v${card.qrVersion}）· ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'zh')} · 保留 ${(payload.energy*100).toFixed(1)}% 能量`,`Formula card · the QR is this formula (QR v${card.qrVersion}) · ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'en')} · ${(payload.energy*100).toFixed(1)}% of the energy`)
+    cardSurface=card.canvas;cardPayload=payload;cardShareURL=pointer?.url??payload.url;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
+    cardStatus=()=>formulaCard?t(`公式卡 · ${formulaSummary(canonicalFormula(source.mode,source.chains),'zh')} · ${pointer?'高清二维码':'自包含二维码'} v${card.qrVersion}`,`Formula card · ${formulaSummary(canonicalFormula(source.mode,source.chains),'en')} · ${pointer?'HD QR':'self-contained QR'} v${card.qrVersion}`)
       :pointer?t(`高清二维码 v${card.qrVersion} · 素描与 ${count()} 项公式已加密保存 30 天 · 文字链接离线也能画出线条`,`HD QR v${card.qrVersion} · Sketch and ${count()}-term formula encrypted for 30 days · The text link draws lines even offline`)
       :t(`${uploadFailed?'上传失败，已改用离线二维码 · ':''}${payload.bytes} 字节 · QR v${card.qrVersion} · ${toneMap?'含素描明暗':'仅轮廓'} · 分享 ${payload.terms.filter(Boolean).join(' / ')} 项`,`${uploadFailed?'Upload failed, using an offline QR · ':''}${payload.bytes} bytes · QR v${card.qrVersion} · ${toneMap?'Includes sketch tones':'Contours only'} · ${payload.terms.filter(Boolean).join(' / ')} shared terms`);
     $('revoke-share').hidden=!pointer;$('card-status').textContent=cardStatus();for(const id of ['save-card','system-share','copy-link'])$(id).disabled=false;$('save-video').disabled=!preferredVideoType();

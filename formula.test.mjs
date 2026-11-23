@@ -47,3 +47,12 @@ test('frequency ladder and energy share',()=>{
   assert.deepEqual(frequencyLadder(40),[2,4,8,16,32,40]);assert.throws(()=>frequencyLadder(0),RangeError);
   const {chains}=portrait();assert.equal(energyShare(chains.x,chains.x),1);assert.ok(energyShare(chains.x.slice(0,3),chains.x)<1);assert.equal(energyShare([],[]),1);
 });
+
+import {formulaCardCopy} from './card.mjs';
+test('formula card copy: one title, one summary, and an honest note about what the QR holds',()=>{
+  const f=canonicalFormula('xy',{x:[{k:1,amplitude:2,phase:0},{k:-1,amplitude:2,phase:0}],y:[{k:2,amplitude:1,phase:0}]});
+  const hd=formulaCardCopy({formula:f,lang:'zh'}),long=formulaCardCopy({formula:f,lang:'zh',selfContained:true});
+  assert.equal(hd.title,'这是我的公式。');assert.equal(hd.subtitle,'它能复原我的样子。');assert.equal(hd.summary,'3 个旋转的圆 · x 1 / y 1 项');
+  assert.match(hd.note,/端到端加密/);assert.match(long.note,/二维码里就是这串公式/);
+  assert.equal(formulaCardCopy({formula:f,name:'Ada',lang:'en'}).title,"Ada's formula.");
+});
