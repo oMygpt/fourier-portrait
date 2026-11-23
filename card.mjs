@@ -1,4 +1,6 @@
+import {drawInk,inkProfile} from './ink.mjs';
 import {drawSketch} from './sketch.mjs';
+import {renderTonePixels} from './tone.mjs';
 import {samplePortrait,closeStrokeSeams} from './portrait-render.mjs';
 import {limitChains} from './portrait.mjs';
 import {scoreCopy} from './riddle.mjs';
@@ -77,15 +79,24 @@ function drawLens(ctx,cx,cy,R,colors){
   ctx.restore();
 }
 
-function drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch,guess,colors}){
+function drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch,guess,colors,tone=null}){
   const hero=cardHero({guess,sketch}),scale=2*R*.84/Math.max(dimensions.width,dimensions.height),map=p=>({x:cx+p.x*scale,y:cy+p.y*scale});
   drawLens(ctx,cx,cy,R,colors);
   ctx.save();ctx.beginPath();ctx.arc(cx,cy,R-3,0,2*Math.PI);ctx.clip();ctx.lineCap=ctx.lineJoin='round';
   if(hero==='portrait'){const w=dimensions.width*scale,h=dimensions.height*scale;drawSketch(ctx,sketch,cx-w/2,cy-h/2,w,h,'ink');}
+  else if(hero==='lines'&&tone){
+    // Coarse tones carried inside the QR itself, rendered with the same hatching as the visitor page.
+    const w=Math.round(dimensions.width*scale),h=Math.round(dimensions.height*scale),layer=document.createElement('canvas');layer.width=w;layer.height=h;
+    const lc=layer.getContext('2d'),pixels=lc.createImageData(w,h),ink=[1,3,5].map(i=>parseInt(colors.line.slice(i,i+2),16));
+    pixels.data.set(renderTonePixels(tone,w,h,ink));lc.putImageData(pixels,0,0);ctx.globalAlpha=.85;ctx.drawImage(layer,cx-w/2,cy-h/2);ctx.globalAlpha=1;
+  }
   const shown=hero==='silhouette'?limitChains(mode,chains,SILHOUETTE_CIRCLES):chains;
   const points=closeStrokeSeams(samplePortrait(mode,shown,path,Math.max(4000,path.length*2)),12);
-  ctx.strokeStyle=colors.line;ctx.globalAlpha=hero==='portrait'?.42:1;ctx.lineWidth=hero==='silhouette'?3:2.4;ctx.beginPath();
-  points.forEach((p,i)=>{const q=map(p);if(!i||hero!=='silhouette'&&!p.draw)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();ctx.globalAlpha=1;
+  ctx.strokeStyle=colors.line;ctx.globalAlpha=hero==='portrait'?.42:tone?.8:1;
+  // The silhouette is one continuous curve (no pen lifts); portraits use tapered hand-drawn ink.
+  if(hero==='silhouette'){ctx.lineWidth=3;ctx.beginPath();points.forEach((p,i)=>{const q=map(p);if(!i)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();}
+  else drawInk(ctx,points,inkProfile(points),map,{width:2.6});
+  ctx.globalAlpha=1;
   ctx.restore();
   if(hero==='silhouette'){ctx.fillStyle=colors.accent;ctx.fillRect(cx+R*.62,cy-R*.92,86,86);ctx.fillStyle=colors.background;ctx.font='64px "Noto Serif SC",serif';ctx.textAlign='center';ctx.fillText('?',cx+R*.62+43,cy-R*.92+66);ctx.textAlign='left';}
 }
@@ -150,13 +161,13 @@ export function renderScoreCard({mode,chains,path,dimensions,n,total,hint='',sha
 // Formula card: "This is my formula. It can restore how I look."
 // Everything printed here is decoded from the QR's own payload (the self-contained link): the visible formula,
 // the line portrait and the counts are exactly what a scan will reconstruct — no server, no expiry.
-export function formulaCardCopy({formula,name='',energy=1,lang='zh',hasSketch=false}){
+export function formulaCardCopy({formula,name='',energy=1,lang='zh',hasSketch=false,hasTone=false}){
   const zh=lang==='zh',pct=`${(energy*100).toFixed(energy>.999?1:1)}%`;
   return {
     title:name?(zh?`${name}的公式。`:`${name}'s formula.`):(zh?'这是我的公式。':'This is my formula.'),
     subtitle:zh?'它能复原我的样子。':'It can bring back how I look.',
     summary:zh?`${formula.circles} 个旋转的圆 · ${formula.axes.map(a=>`${a.axis} ${a.terms.length}`).join(' / ')} 项 · 保留 ${pct} 能量`:`${formula.circles} rotating circles · ${formula.axes.map(a=>`${a.axis} ${a.terms.length}`).join(' / ')} terms · ${pct} of the energy`,
-    portrait:zh?'↑ 只用这串公式画出的我':'↑ Drawn from this formula alone',
+    portrait:hasTone?(zh?'↑ 只用二维码里的公式与明暗画出的我':'↑ Drawn from the formula and tones in the QR alone'):(zh?'↑ 只用这串公式画出的我':'↑ Drawn from this formula alone'),
     cta:zh?'扫码，用这串公式复原我':'Scan to rebuild me from this formula',
     promise:zh?['二维码里就是这串公式',hasSketch?'线条永久可复原 · 素描 30 天内可见':'不经服务器 · 永不过期']:['The QR holds this very formula',hasSketch?'Lines restore forever · sketch for 30 days':'No server · never expires']
   };
@@ -177,10 +188,10 @@ function wrapFormula(ctx,{axis,terms,real},x,y,width,lineHeight,maxLines,lang){
   return {height:lines.length*lineHeight,note};
 }
 
-export function renderFormulaCard({mode,chains,path,dimensions,name='',energy=1,shareURL,lang='zh',hasSketch=false,date=new Date()},format='34'){
+export function renderFormulaCard({mode,chains,path,dimensions,toneMap=null,name='',energy=1,shareURL,lang='zh',hasSketch=false,date=new Date()},format='34'){
   const card=document.createElement('canvas');card.width=1080;card.height=format==='916'?1920:1440;
   const ctx=card.getContext('2d'),h=card.height,tall=format==='916',colors=getPalette('ink'),zh=lang==='zh';
-  const formula=canonicalFormula(mode,chains),copy=formulaCardCopy({formula,name,energy,lang,hasSketch});
+  const formula=canonicalFormula(mode,chains),copy=formulaCardCopy({formula,name,energy,lang,hasSketch,hasTone:Boolean(toneMap)});
   ctx.fillStyle=colors.background;ctx.fillRect(0,0,1080,h);
   for(let i=0;i<26000;i++){ctx.fillStyle=colors.line+'06';ctx.fillRect(i*173%1080,i*i*137%h,1,1);}
   ctx.strokeStyle=colors.accent+'55';ctx.lineWidth=1;ctx.strokeRect(36.5,36.5,1007,h-73);
@@ -204,7 +215,7 @@ export function renderFormulaCard({mode,chains,path,dimensions,name='',energy=1,
   // Left column: the lens with the line portrait, its caption and the promise; right column: the QR.
   const qr=drawShareQr(ctx,shareURL,1008,h-56,460),column=1008-qr.extent-24-88,top=y+56,bottom=h-64;
   const R=Math.max(90,Math.min(column/2-34,(bottom-top-150)/2)),cx=88+column/2,cy=top+R+34;
-  drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch:null,guess:false,colors});
+  drawHero(ctx,{cx,cy,R,mode,chains,path,dimensions,sketch:null,guess:false,colors,tone:toneMap});
   ctx.textAlign='center';ctx.fillStyle=colors.muted;ctx.font='20px "Noto Serif SC",serif';ctx.fillText(copy.portrait,cx,cy+R+58);
   ctx.font='18px "Noto Serif SC",serif';copy.promise.forEach((line,i)=>ctx.fillText(line,cx,cy+R+92+i*28));
   ctx.fillStyle=colors.text;ctx.font='30px "Noto Serif SC",serif';ctx.textAlign='right';ctx.fillText(copy.cta,1008,qr.top-28);ctx.textAlign='left';

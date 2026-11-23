@@ -1,3 +1,4 @@
+import {inkProfile} from './ink.mjs';
 // Frequency ladder shared by the riddle and the video: the same portrait rebuilt with 2, 4, 8, … circles.
 // All rungs use the same sampling so they can be morphed point by point.
 import {frequencyLadder,energyShare} from './formula.mjs';
@@ -13,7 +14,7 @@ export function portraitCurve(mode,chains,path,samples){
 export function ladderRungs(mode,chains,path,samples=2400){
   const all=circlesOf(mode,chains);
   if(!all.length||!path.length)throw new RangeError('Nothing to draw');
-  return frequencyLadder(all.length).map(n=>{const selected=limitChains(mode,chains,n);return {n,energy:energyShare(circlesOf(mode,selected),all),points:portraitCurve(mode,selected,path,samples)};});
+  return frequencyLadder(all.length).map(n=>{const selected=limitChains(mode,chains,n);const points=portraitCurve(mode,selected,path,samples);return {n,energy:energyShare(circlesOf(mode,selected),all),points,ink:inkProfile(points)};});
 }
 
 // Rungs visually identical to the full portrait (≥99.9% energy) are skipped, except the last.

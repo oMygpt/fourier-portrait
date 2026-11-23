@@ -9,6 +9,7 @@ import {prepareVideo,recordVideo,preferredVideoType} from './video.mjs';
 import {prepareRiddle,riddleState,recognisedAt,scoreText} from './riddle.mjs';
 import {analyzeSketch} from './path.mjs';
 import {portraitInk,samplePortrait,closeStrokeSeams,visitorInk} from './portrait-render.mjs';
+import {drawInk,inkProfile} from './ink.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {getPalette,normalizePalette} from './palettes.mjs';
 import {featureRegions} from './portrait-preprocess.mjs';
@@ -190,14 +191,21 @@ function previewFormula(){
   $('restore-auto').hidden=!manual;$('shared-count').textContent=t(`${count()} / ${$('shared-terms').max} 个圆`,`${count()} / ${$('shared-terms').max} circles`);
 }
 function pen(t){const p=mode==='xy'?{x:chainTip(activeX,t).x,y:chainTip(activeY,t,Math.PI/2).y}:evaluate(active,t);return{x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale};}
+// The pen's trail, sampled once per set of active circles, drawn as tapered hand-drawn ink.
+let trailCache=null;
+function trailInk(){
+  if(!trailCache||trailCache.x!==activeX||trailCache.y!==activeY||trailCache.z!==active||trailCache.mode!==mode){const points=samplePortrait(mode,chains(),path,7200);trailCache={x:activeX,y:activeY,z:active,mode,points,profile:inkProfile(points)};}
+  return trailCache;
+}
 function drawTrail(target){
-  ink.strokeStyle=colors().line;ink.lineWidth=shared?visitorInk(sharedWidth,surfaceRatio,palette).width:2.2;ink.lineJoin=ink.lineCap='round';ink.beginPath();const start=pen(drawn/7200);ink.moveTo(start.x,start.y);
-  for(let i=drawn+1;i<=target;i++){const p=pen(i/7200);if(path[Math.min(path.length-1,Math.floor(i/7200*path.length))]?.draw)ink.lineTo(p.x,p.y);else ink.moveTo(p.x,p.y);}ink.stroke();drawn=target;
+  if(!path.length||target<=drawn){drawn=Math.max(drawn,target);return;}
+  const {points,profile}=trailInk(),map=p=>({x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale});
+  ink.strokeStyle=colors().line;drawInk(ink,points,profile,map,{width:shared?visitorInk(sharedWidth,surfaceRatio,palette).width:2.4,from:drawn+1,to:target+1});drawn=target;
 }
 function drawSharedPortrait(){
   const points=samplePortrait(mode,chains(),path,Math.max(7200,Math.ceil(canvas.width*8/path.length)*path.length)).map(p=>({...p,x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}));
-  const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio,palette);ink.clearRect(0,0,900,900);ink.strokeStyle=portraitInk(palette).color;ink.lineWidth=style.width;ink.lineJoin=ink.lineCap='round';ink.beginPath();
-  strokes.forEach((p,i)=>{if(!i||!p.draw)ink.moveTo(p.x,p.y);else ink.lineTo(p.x,p.y);});ink.stroke();drawn=7200;
+  const strokes=closeStrokeSeams(points,12),style=visitorInk(sharedWidth,surfaceRatio,palette);ink.clearRect(0,0,900,900);ink.strokeStyle=portraitInk(palette).color;
+  drawInk(ink,strokes,inkProfile(strokes),p=>p,{width:style.width*1.1});drawn=7200;
 }
 function composition(context,progress,complete=false){
   const visible=shared?Boolean(toneSurface||sharedFull):sketch&&!sketchPending,arrival=!shared&&sketchArrived&&!reduced.matches&&!complete?Math.min(1,(performance.now()-sketchArrived)/1200):1,fade=sharedFull?(reduced.matches||complete?1:Math.min(1,(performance.now()-fullArrived)/1200)):0;
@@ -227,7 +235,8 @@ function renderRiddle(){
   const a=riddle.rungs[state.index],b=riddle.rungs[Math.min(riddle.rungs.length-1,state.index+1)],f=state.morph,shown=recognisedAt(riddle.rungs,state);
   const map=p=>({x:plot.x+p.x*plot.scale,y:plot.y+p.y*plot.scale}),points=a.points.map((p,i)=>({x:p.x+(b.points[i].x-p.x)*f,y:p.y+(b.points[i].y-p.y)*f,draw:f<.5?p.draw:b.points[i].draw}));
   ctx.lineCap=ctx.lineJoin='round';
-  for(const [color,width,lifts] of [[colors().guide,1,false],[colors().line,2.4,true]]){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();points.forEach((p,i)=>{const q=map(p);if(!i||(lifts&&!p.draw))ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();}
+  ctx.strokeStyle=colors().guide;ctx.lineWidth=1;ctx.beginPath();points.forEach((p,i)=>{const q=map(p);if(!i)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});ctx.stroke();
+  ctx.strokeStyle=colors().line;drawInk(ctx,points,f<.5?a.ink:b.ink,map,{width:2.6});
   if(shown!==riddleShown){riddleShown=shown;$('progress').textContent=`N = ${shown}`;$('riddle-count').textContent=t(`现在：${shown} 个圆 / 共 ${riddle.total} 个`,`Now: ${shown} of ${riddle.total} circles`);}
   $('drawing-progress').value=(state.index+f)/Math.max(1,riddle.rungs.length-1);
 }
@@ -288,7 +297,7 @@ async function createCard(){
     const pointer=encryptedSketch?encodePointer({reference:encryptedSketch,counts:mode==='xy'?[activeX.length,activeY.length]:[active.length,0],name:snapshot.name,guess:snapshot.guess,hint:snapshot.hint,palette:snapshot.palette}):null;
     // Formula card: its QR *is* the formula (self-contained link). What it prints is decoded from that same payload.
     const formulaCard=cardType()==='formula',decoded=formulaCard?decodePortrait(payload.url):null;
-    const card=formulaCard?renderFormulaCard({mode:decoded.mode,chains:decoded.chains,path:decoded.path,dimensions:decoded.dimensions,name:snapshot.name,energy:payload.energy,shareURL:payload.url,lang,hasSketch:Boolean(encryptedSketch)},$('card-format').value)
+    const card=formulaCard?renderFormulaCard({mode:decoded.mode,chains:decoded.chains,path:decoded.path,dimensions:decoded.dimensions,toneMap:decoded.toneMap,name:snapshot.name,energy:payload.energy,shareURL:payload.url,lang,hasSketch:Boolean(encryptedSketch)},$('card-format').value)
       :renderSocialCard({...snapshot,sketch:sketchHasTone&&sketch&&!sketchPending?(tinted||=tintSketch(sketch,palette)):null,lang,shareURL:pointer?.url??payload.url},$('card-format').value);
     cardSurface=card.canvas;cardPayload=payload;cardShareURL=formulaCard?payload.url:pointer?.url??payload.url;$('card-preview').src=cardSurface.toDataURL('image/png');$('share-url').value=payload.url;
     cardStatus=()=>formulaCard?t(`公式卡 · 二维码里就是这串公式（QR v${card.qrVersion}）· ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'zh')} · 保留 ${(payload.energy*100).toFixed(1)}% 能量`,`Formula card · the QR is this formula (QR v${card.qrVersion}) · ${formulaSummary(canonicalFormula(decoded.mode,decoded.chains),'en')} · ${(payload.energy*100).toFixed(1)}% of the energy`)

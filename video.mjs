@@ -1,3 +1,4 @@
+import {drawInk,inkProfile} from './ink.mjs';
 // 9:16 drawing video that shows what a Fourier series *is*, not just the result:
 //   A  draw   — XY epicycle chains trace the portrait (every line is a sum of circles)
 //   B  ladder — the same curve rebuilt with 2 → 4 → … → N circles (low frequencies shape, high ones detail)
@@ -32,11 +33,11 @@ export {trimLadder};
 export function prepareVideo({mode,chains,path,dimensions,sketch=null,qr=null,name='',guess=false,hint='',lang='zh',palette='ink'}){
   const formula=canonicalFormula(mode,chains),total=formula.circles;
   if(!path.length||!total)throw new RangeError('Nothing to draw');
-  const samples=Math.max(2400,path.length),trail=portraitCurve(mode,chains,path,samples),ladder=trimLadder(ladderRungs(mode,chains,path,samples));
+  const samples=Math.max(2400,path.length),trail=portraitCurve(mode,chains,path,samples),trailInk=inkProfile(trail),ladder=trimLadder(ladderRungs(mode,chains,path,samples));
   const layout=mode==='xy'?xyLayout(dimensions,axisEnvelope(chains.x),axisEnvelope(chains.y)):{plot:{x:450,y:450,scale:590/Math.max(dimensions.width,dimensions.height)}};
   // After the chains have drawn, the camera moves in: the portrait alone, centred and larger.
   const focus={x:450,y:430,scale:800/Math.max(dimensions.width,dimensions.height)};
-  return {mode,chains,path,dimensions,sketch,qr,name,guess,hint,lang,colors:getPalette(palette),trail,samples,ladder,layout,focus,total,formula:formulaLines(formula,2)};
+  return {mode,chains,path,dimensions,sketch,qr,name,guess,hint,lang,colors:getPalette(palette),trail,trailInk,samples,ladder,layout,focus,total,formula:formulaLines(formula,2)};
 }
 
 const t=(prep,zh,en)=>prep.lang==='zh'?zh:en;
@@ -78,7 +79,7 @@ export function drawVideoFrame(ctx,prep,time){
   let caption='',detail='';
   if(phase.name==='draw'){
     const u=ease(phase.progress),upto=Math.max(1,Math.floor(u*prep.samples));
-    ctx.strokeStyle=colors.line;ctx.lineWidth=2.4;stroke(ctx,prep.trail,map,upto);
+    ctx.strokeStyle=colors.line;drawInk(ctx,prep.trail,prep.trailInk,map,{width:2.6,to:upto});
     let tip;
     if(mode==='xy'){
       const X=chain(ctx,chains.x,layout.top,u,plot.scale,0,colors),Y=chain(ctx,chains.y,layout.left,u,plot.scale,Math.PI/2,colors);tip={x:X.x,y:Y.y};
@@ -91,7 +92,7 @@ export function drawVideoFrame(ctx,prep,time){
     const a=levels[Math.max(0,i)],b=levels[Math.min(levels.length-1,i+1)],shown=f<.5?a:b,points=a.points.map((p,j)=>({x:p.x+(b.points[j].x-p.x)*f,y:p.y+(b.points[j].y-p.y)*f,draw:f<.5?p.draw:b.points[j].draw}));
     // One closed curve (faint, including pen travel) — the strokes are where the pen touches paper.
     ctx.strokeStyle=colors.guide;ctx.lineWidth=1;stroke(ctx,points,map,points.length,false);
-    ctx.strokeStyle=colors.line;ctx.lineWidth=2.2;stroke(ctx,points,map);
+    ctx.strokeStyle=colors.line;drawInk(ctx,points,f<.5?a.ink:b.ink,map,{width:2.4});
     caption=t(prep,'低频定轮廓，高频添细节','Low frequencies shape. High ones add detail.');
     detail=t(prep,`${shown.n} 个圆 · 保留 ${(shown.energy*100).toFixed(1)}% 能量`,`${shown.n} circles · ${(shown.energy*100).toFixed(1)}% of the energy`);
   }else{
@@ -100,7 +101,7 @@ export function drawVideoFrame(ctx,prep,time){
       const w=prep.dimensions.width*plot.scale,h=prep.dimensions.height*plot.scale;
       ctx.globalAlpha=reveal;ctx.globalCompositeOperation='multiply';ctx.drawImage(prep.sketch,plot.x-w/2,plot.y-h/2,w,h);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
     }
-    ctx.strokeStyle=colors.line;ctx.globalAlpha=prep.sketch&&!prep.guess?1-.65*reveal:1;ctx.lineWidth=2.2;stroke(ctx,prep.trail,map);ctx.globalAlpha=1;
+    ctx.strokeStyle=colors.line;ctx.globalAlpha=prep.sketch&&!prep.guess?1-.65*reveal:1;drawInk(ctx,prep.trail,prep.trailInk,map,{width:2.4});ctx.globalAlpha=1;
     caption=prep.guess?t(prep,'猜猜我是谁？','Guess who?')+(prep.hint?t(prep,` 提示：${prep.hint}`,` Hint: ${prep.hint}`):''):prep.name?t(prep,`${prep.name}，原来圆周记得你`,`${prep.name} — the circles remember`):t(prep,'原来，圆周记得你','The circles remember you');
     detail=t(prep,`${prep.total} 个旋转的圆 · 一个公式`,`${prep.total} rotating circles · one formula`);
   }
