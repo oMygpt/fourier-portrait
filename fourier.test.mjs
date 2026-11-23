@@ -18,7 +18,7 @@ import {deflateSync,inflateSync} from './vendor/fflate/fflate.mjs';
 import {samplePortrait,closeStrokeSeams,visitorInk,PORTRAIT_INK} from './portrait-render.mjs';
 import {shouldReloadForHash} from './navigation.mjs';
 import {u2Input,u2Gray,sketchReveal,paperSketch,sketchBlend,subjectMatte} from './sketch.mjs';
-import {modelLineArt,cancelLineArt,STALL_MS} from './ml-client.mjs';
+import {modelLineArt,cancelLineArt,STALL_MS,warmModels} from './ml-client.mjs';
 
 test('sketch matte keeps the connected portrait and its soft hair margin, not detached background blobs',()=>{
   const w=21,h=21,matte=new Uint8Array(w*h);for(let y=5;y<17;y++)for(let x=5;x<17;x++)matte[y*w+x]=255;
@@ -37,6 +37,19 @@ test('paper masking removes background and frame edges without pruning interior 
   assert.ok(paperSketch(gray,w,h,new Uint8Array(w*h).fill(128))[50*w+50]>0);
   assert.throws(()=>paperSketch([],0,0),RangeError);assert.throws(()=>paperSketch(gray,w,h,new Uint8Array(2)),RangeError);
   assert.equal(sketchBlend('ink'),'multiply');assert.equal(sketchBlend('navy'),'screen');assert.equal(sketchBlend('silver'),'screen');
+});
+
+test('upload intent warms models in the shared worker; data-saver connections skip it',async()=>{
+  const originalWorker=globalThis.Worker,originalBitmap=globalThis.createImageBitmap,instances=[];
+  globalThis.createImageBitmap=async()=>({});
+  globalThis.Worker=class{constructor(){instances.push(this);this.sent=[];}postMessage(data){this.sent.push(data);}terminate(){this.terminated=true;}};
+  try{
+    assert.equal(warmModels({saveData:true}),false);assert.equal(instances.length,0);
+    assert.equal(warmModels({}),true);assert.deepEqual(instances[0].sent,[{warm:true}]);
+    const job=modelLineArt({},'contour',()=>{});await Promise.resolve();await Promise.resolve();
+    assert.equal(instances.length,1,'the job reuses the warmed worker (and its in-flight downloads)');assert.equal(instances[0].sent[1].id>0,true);
+    instances[0].onmessage({data:{id:instances[0].sent[1].id,gray:Uint8Array.of(1)}});await job;
+  }finally{cancelLineArt();globalThis.Worker=originalWorker;globalThis.createImageBitmap=originalBitmap;}
 });
 
 test('ML client times out only after a stall, not while large models keep downloading',async t=>{

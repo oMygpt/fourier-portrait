@@ -11,9 +11,7 @@ export function cancelLineArt(onlyPending=false){
   for(const request of pending.values()){clearTimeout(request.timer);if(request.resolved)request.onSketch({sketchFallback:true});else request.reject(Error('已切换经典算法'));}pending.clear();
 }
 
-export async function modelLineArt(image,style,onProgress,onSketch=()=>{}){
-  if(!globalThis.Worker||!globalThis.createImageBitmap)throw Error('当前设备不支持模型描线');
-  const bitmap=await createImageBitmap(image),id=++sequence;
+function ensureWorker(){
   if(!worker){
     worker=new Worker(new URL('./ml-worker.js',import.meta.url));
     worker.onmessage=({data})=>{
@@ -25,8 +23,21 @@ export async function modelLineArt(image,style,onProgress,onSketch=()=>{}){
     };
     worker.onerror=event=>{event.preventDefault();cancelLineArt();};
   }
+  return worker;
+}
+
+// Start downloading models as soon as someone shows intent to upload (choosing a file takes seconds).
+// Skipped for data-saver connections; visitors who only scan a QR never trigger it.
+export function warmModels(connection=globalThis.navigator?.connection){
+  if(!globalThis.Worker||connection?.saveData)return false;
+  ensureWorker().postMessage({warm:true});return true;
+}
+
+export async function modelLineArt(image,style,onProgress,onSketch=()=>{}){
+  if(!globalThis.Worker||!globalThis.createImageBitmap)throw Error('当前设备不支持模型描线');
+  const bitmap=await createImageBitmap(image),id=++sequence,current=ensureWorker();
   return new Promise((resolve,reject)=>{
     const request={resolve,reject,onProgress,onSketch,timer:null,resolved:false};arm(request);
-    pending.set(id,request);worker.postMessage({id,bitmap,style},[bitmap]);
+    pending.set(id,request);current.postMessage({id,bitmap,style},[bitmap]);
   });
 }

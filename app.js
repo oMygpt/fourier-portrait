@@ -1,6 +1,6 @@
 import {dft,realDft,evaluate,chainTip,axisEnvelope,xyLayout} from './fourier.mjs';
 import {xdog,styleParameters,thresholdSketch} from './lineart.mjs';
-import {modelLineArt,cancelLineArt} from './ml-client.mjs';
+import {modelLineArt,cancelLineArt,warmModels} from './ml-client.mjs';
 import {formulaBody,latexDocument,limitChains} from './portrait.mjs';
 import {encodePortrait,decodePortrait,cleanName,cleanHint,SHARE_BASE} from './share.mjs';
 import {renderSocialCard,renderScoreCard,renderFormulaCard,drawCardQr} from './card.mjs';
@@ -334,9 +334,9 @@ for(const button of document.querySelectorAll('[data-lang]'))button.addEventList
 for(const[id,zh,en,file]of samples){const button=document.createElement('button');button.className='sample';button.dataset.sample=id;const image=new Image(52,52);image.src=`samples/${id}-thumb.jpg`;image.alt='';const label=document.createElement('span');label.textContent=t(zh,en);button.append(image,label);button.addEventListener('click',()=>loadImage(`samples/${id}.jpg`,en,false,id));$('samples').append(button);
   const link=document.createElement('a');link.href=`https://commons.wikimedia.org/wiki/File:${file}`;link.textContent=en+' ↗';link.target='_blank';link.rel='noreferrer';$('credits').append(link);}
 async function upload(file){if(!file)return;if(!['image/jpeg','image/png'].includes(file.type)){errorText=()=>t('请选择 JPG 或 PNG 格式的图片。','Please choose a JPG or PNG image.');updateUI();return;}const url=URL.createObjectURL(file);try{await loadImage(url,file.name);}finally{URL.revokeObjectURL(url);}}
-for(const id of ['choose','change'])$(id).addEventListener('click',()=>$('upload').click());
+for(const id of ['choose','change'])$(id).addEventListener('click',()=>{warmModels();$('upload').click();});
 $('upload').addEventListener('change',e=>{upload(e.target.files[0]);e.target.value='';});
-let dragDepth=0;document.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();dragDepth++;$('observatory').classList.add('dragging');}});document.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});document.addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;$('observatory').classList.remove('dragging');}});document.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('observatory').classList.remove('dragging');if(!shared)upload(e.dataTransfer.files[0]);});
+let dragDepth=0;document.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();if(!shared)warmModels();dragDepth++;$('observatory').classList.add('dragging');}});document.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});document.addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;$('observatory').classList.remove('dragging');}});document.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('observatory').classList.remove('dragging');if(!shared)upload(e.dataTransfer.files[0]);});
 $('play').addEventListener('click',()=>{playing=!playing;updateUI();});$('skip').addEventListener('click',finish);$('replay').addEventListener('click',()=>reset());
 $('terms').addEventListener('input',()=>{manual=true;reset();});$('restore-auto').addEventListener('click',()=>{manual=false;reset();});
 $('shared-terms').addEventListener('input',()=>{if(!shared)return;const selected=limitChains(mode,{x:xCoefficients,y:yCoefficients,complex:coefficients},Number($('shared-terms').value));activeX=selected.x;activeY=selected.y;active=selected.complex;previewFormula();if(stage==='result')drawSharedPortrait();else{layout();ink.clearRect(0,0,900,900);drawn=0;drawTrail(Math.floor(time*7200));}});
