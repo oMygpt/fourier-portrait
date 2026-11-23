@@ -195,7 +195,7 @@ test('language defaults and download details are local, bilingual and empty-safe
   assert.match(progressDetails({cached:true},'zh').bytes,/已缓存/);
   assert.match(progressDetails({},'en').bytes,/Computing/);
   assert.equal(progressDetails({received:1e6,total:0},'en').bytes,'1.0 MB');
-  assert.match(progressDetails({received:0,total:10},'zh').eta,/预计/);
+  assert.match(progressDetails({received:0,total:10},'zh').eta,/55 MB/);
 });
 
 test('creator has one XY workflow, one final overlay and only in-panel circle controls',()=>{
