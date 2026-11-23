@@ -22,6 +22,7 @@ import {createToneMap,renderTonePixels} from './tone.mjs';
 import {publishBundle,fetchSketch,fetchEnvelope,revokeShare} from './encrypted-sketch.mjs';
 import {listShares,rememberShare,forgetShare} from './my-shares.mjs';
 import {packPortraitMeta,unpackPortraitMeta,encodePointer,decodePointer} from './bundle.mjs';
+import {setupDuet} from './duet.mjs';
 
 const $=id=>document.getElementById(id),canvas=$('canvas'),ctx=canvas.getContext('2d');
 const trail=document.createElement('canvas');trail.width=trail.height=900;
@@ -51,6 +52,7 @@ function updateUI(){
   $('working-actions').hidden=stage!=='drawing'||demo;
   $('result-actions').hidden=shared||stage!=='result';
   $('shared-start').hidden=!shared||stage==='riddle';
+  $('duet-entry').hidden=!shared||stage==='riddle';$('duet-start').hidden=!sharedFull;$('duet-note').hidden=Boolean(sharedFull)||fullState==='loading';
   if(shared&&sharedGuess&&stage==='result')$('shared-start').textContent=t('回赠一张 ↗','Send one back ↗');
   $('riddle').hidden=stage!=='riddle';$('riddle-hint').hidden=!sharedHint;$('riddle-hint').textContent=t('提示：','Hint: ')+sharedHint;
   const waiting=stage==='riddle'&&Boolean(riddle?.waiting);$('riddle-actions').hidden=waiting;$('riddle-more').hidden=waiting;$('riddle-sealed').hidden=!waiting;
@@ -499,4 +501,5 @@ async function loadBundleShared(){
 }
 window.addEventListener('hashchange',()=>{try{if(shouldReloadForHash(location.hash)){history.scrollRestoration='manual';scrollTo({top:0,left:0,behavior:'instant'});location.reload();}}catch{errorText=()=>t('分享链接无效，当前作品已保留。','Invalid share link. Your current portrait is preserved.');updateUI();}});
 window.addEventListener('load',()=>{if(path.length&&!demo)previewFormula();});
+setupDuet({$,t,lang:()=>lang,sharer:()=>sharedFull&&{surface:sharedFull,name:sharedName}});
 updateUI();renderShares();if(location.hash.startsWith('#s'))loadBundleShared();else if(location.hash.startsWith('#p=')||location.hash.startsWith('#n'))loadShared();else loadImage('samples/fourier.jpg','Fourier',true,'fourier');requestAnimationFrame(frame);
